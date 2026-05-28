@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Daemon OS | Autenticação</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <style>
+        :root { --bg: #050505; --panel: #111; --accent: #00ff88; --text: #fff; --text-muted: #888; --radius: 20px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background: var(--bg); color: var(--text); display: flex; justify-content: center; align-items: center; min-height: 100vh; overflow: hidden; }
+
+        .container { width: 100%; max-width: 400px; padding: 30px; position: relative; z-index: 2; }
+        
+        /* Logo e Cabeçalho */
+        .header { text-align: center; margin-bottom: 40px; }
+        .logo-icon { font-size: 50px; color: var(--accent); margin-bottom: 10px; text-shadow: 0 0 20px rgba(0,255,136,0.4); }
+        .title { font-size: 28px; font-weight: 900; letter-spacing: 2px; }
+        .subtitle { font-size: 13px; color: var(--text-muted); margin-top: 5px; }
+
+        /* Formulários */
+        .form-box { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05); border-radius: var(--radius); padding: 30px 20px; backdrop-filter: blur(10px); box-shadow: 0 20px 50px rgba(0,0,0,0.5); display: none; animation: slideUp 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .form-box.active { display: block; }
+        @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Campos de Entrada */
+        .input-group { margin-bottom: 20px; position: relative; }
+        .input-label { display: block; font-size: 11px; color: var(--text-muted); font-weight: bold; text-transform: uppercase; margin-bottom: 8px; letter-spacing: 1px; }
+        .input-wrapper { display: flex; align-items: center; background: rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; overflow: hidden; transition: 0.3s; }
+        .input-wrapper:focus-within { border-color: var(--accent); box-shadow: 0 0 15px rgba(0,255,136,0.2); }
+        
+        .input-icon { padding: 15px; color: var(--text-muted); font-size: 14px; }
+        .input-field { flex: 1; background: transparent; border: none; color: #fff; padding: 15px 15px 15px 0; font-size: 15px; width: 100%; }
+        
+        /* Email Sufixo (O @daemon.com cravado) */
+        .email-suffix { padding-right: 15px; color: var(--accent); font-weight: bold; font-size: 14px; pointer-events: none; }
+        
+        /* Olho da Senha */
+        .eye-btn { padding: 15px; color: var(--text-muted); cursor: pointer; border: none; background: transparent; font-size: 16px; }
+
+        /* Botão Apple Mola */
+        .btn-apple { width: 100%; background: linear-gradient(145deg, #00ff88, #00b3ff); color: #000; border: none; padding: 16px; border-radius: 14px; font-size: 15px; font-weight: 900; letter-spacing: 1px; cursor: pointer; transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275), box-shadow 0.2s; box-shadow: 0 5px 15px rgba(0,255,136,0.3); margin-top: 10px; }
+        .btn-apple:active { transform: scale(0.95); box-shadow: 0 2px 8px rgba(0,255,136,0.2); }
+
+        /* Checkbox de Permissão de Segurança */
+        .tos-group { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 20px; margin-top: 10px; }
+        .tos-checkbox { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; flex-shrink: 0; margin-top: 2px; }
+        .tos-text { font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+        .tos-text strong { color: #fff; }
+
+        .switch-link { text-align: center; margin-top: 25px; font-size: 13px; color: var(--text-muted); }
+        .switch-link span { color: var(--accent); font-weight: bold; cursor: pointer; text-decoration: underline; }
+
+        /* Alertas */
+        #alert-box { position: fixed; top: -100px; left: 50%; transform: translateX(-50%); background: rgba(20,20,20,0.95); border: 1px solid var(--accent); color: #fff; padding: 15px 25px; border-radius: 30px; font-size: 13px; font-weight: bold; transition: 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); z-index: 9999; display: flex; align-items: center; gap: 10px; backdrop-filter: blur(10px); }
+        #alert-box.show { top: 30px; }
+        .alert-error { border-color: #ff3366 !important; }
+        .alert-error i { color: #ff3366; }
+    </style>
+</head>
+<body>
+
+    <div id="alert-box"><i class="fa-solid fa-bell"></i> <span id="alert-msg">Mensagem</span></div>
+
+    <div class="container">
+        <div class="header">
+            <i class="fa-solid fa-microchip logo-icon"></i>
+            <div class="title">DAEMON OS</div>
+            <div class="subtitle">Conexão Segura Ponto-a-Ponto</div>
+        </div>
+
+        <div class="form-box active" id="login-form">
+            <div class="input-group">
+                <label class="input-label">Usuário Daemon</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-user input-icon"></i>
+                    <input type="text" id="log-user" class="input-field" placeholder="ex: arthur" autocomplete="off">
+                    <span class="email-suffix">@daemon.com</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Senha de Acesso</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-lock input-icon"></i>
+                    <input type="password" id="log-pass" class="input-field" placeholder="••••••••">
+                    <button class="eye-btn" onclick="togglePass('log-pass', this)"><i class="fa-solid fa-eye"></i></button>
+                </div>
+            </div>
+
+            <button class="btn-apple" onclick="fazerLogin()">INICIAR SESSÃO</button>
+            <div class="switch-link">Novo na matriz? <span onclick="switchForm('register-form')">Criar Identidade</span></div>
+        </div>
+
+        <div class="form-box" id="register-form">
+            <div class="input-group">
+                <label class="input-label">Número do WhatsApp (Com DDI)</label>
+                <div class="input-wrapper">
+                    <i class="fa-brands fa-whatsapp input-icon"></i>
+                    <input type="number" id="reg-numero" class="input-field" placeholder="Ex: 551199999999 ou 362080...">
+                </div>
+                <div style="font-size: 9px; color: var(--accent); margin-top: 5px;">*Use o DDI do seu país. Br = 55. Não use +.</div>
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Crie seu Usuário</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-at input-icon"></i>
+                    <input type="text" id="reg-user" class="input-field" placeholder="seu.nome" autocomplete="off">
+                    <span class="email-suffix">@daemon.com</span>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <label class="input-label">Crie uma Senha (Mín 4 carac.)</label>
+                <div class="input-wrapper">
+                    <i class="fa-solid fa-key input-icon"></i>
+                    <input type="password" id="reg-pass" class="input-field" placeholder="Sua senha secreta">
+                    <button class="eye-btn" onclick="togglePass('reg-pass', this)"><i class="fa-solid fa-eye"></i></button>
+                </div>
+            </div>
+
+            <div class="tos-group">
+                <input type="checkbox" id="reg-tos" class="tos-checkbox">
+                <label for="reg-tos" class="tos-text">
+                    Declaro que este número é meu e <strong>concedo permissão à Matriz Daemon</strong> para registrar meu IP e monitorar minhas requisições contra fraudes.
+                </label>
+            </div>
+
+            <button class="btn-apple" onclick="fazerRegistro()">CRIPTOGRAFAR IDENTIDADE</button>
+            <div class="switch-link">Já tem acesso? <span onclick="switchForm('login-form')">Entrar</span></div>
+        </div>
+    </div>
+
+    <script>
+        function showAlert(msg, isError = false) {
+            const box = document.getElementById('alert-box');
+            document.getElementById('alert-msg').innerText = msg;
+            if(isError) box.classList.add('alert-error'); else box.classList.remove('alert-error');
+            box.classList.add('show');
+            setTimeout(() => box.classList.remove('show'), 4000);
+        }
+
+        function switchForm(formId) {
+            document.getElementById('login-form').classList.remove('active');
+            document.getElementById('register-form').classList.remove('active');
+            document.getElementById(formId).classList.add('active');
+        }
+
+        // Função de mostrar/esconder senha
+        function togglePass(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const icon = btn.querySelector('i');
+            if (input.type === "password") {
+                input.type = "text";
+                icon.classList.remove('fa-eye'); icon.classList.add('fa-eye-slash');
+            } else {
+                input.type = "password";
+                icon.classList.remove('fa-eye-slash'); icon.classList.add('fa-eye');
+            }
+        }
+
+        async function fazerLogin() {
+            const u = document.getElementById('log-user').value.trim();
+            const p = document.getElementById('log-pass').value;
+            if(!u || !p) return showAlert("Preencha todos os campos!", true);
+            
+            const emailFull = u.includes('@') ? u : u + '@daemon.com';
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: emailFull, password: p })
+                });
+                const data = await res.json();
+                if(data.success) { showAlert(data.msg); setTimeout(() => window.location.href = '/os', 1000); }
+                else showAlert(data.msg, true);
+            } catch(e) { showAlert("Erro na rede.", true); }
+        }
+
+        async function fazerRegistro() {
+            const n = document.getElementById('reg-numero').value.trim();
+            const u = document.getElementById('reg-user').value.trim();
+            const p = document.getElementById('reg-pass').value;
+            const tos = document.getElementById('reg-tos').checked;
+
+            if(!n || !u || !p) return showAlert("Preencha todos os campos!", true);
+            if(p.length < 4) return showAlert("A senha é muito fraca.", true);
+            if(!tos) return showAlert("Você deve aceitar os termos de monitoramento!", true);
+
+            // Transforma espaço e caracteres doidos em formato de email
+            const cleanUser = u.replace(/\s+/g, '.').toLowerCase();
+            const emailFull = cleanUser + '@daemon.com';
+
+            try {
+                const res = await fetch('/api/register', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ numero: n, email: emailFull, password: p, consent: tos })
+                });
+                const data = await res.json();
+                if(data.success) { showAlert(data.msg); setTimeout(() => window.location.href = '/os', 1000); }
+                else showAlert(data.msg, true);
+            } catch(e) { showAlert("Erro na rede.", true); }
+        }
+    </script>
+</body>
+</html>

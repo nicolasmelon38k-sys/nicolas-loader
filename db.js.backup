@@ -1,0 +1,77 @@
+const fs = require('fs');
+const path = require('path');
+
+const dbPath = path.join(__dirname, 'data', 'database.json');
+
+const usuarioPadrao = {
+    nome: "Não registrado",
+    dinheiro: 100,
+    banco: 0,
+    xp: 0,
+    level: 1,
+    mensagens: 0,
+    emprego: "Auxiliar Geral",
+    status: "Solteiro(a)",
+    comandos: 0,
+    tempoAtivo: 0, // Novo campo em segundos
+    inventario: []
+};
+
+const database = {
+    ler: () => {
+        if (!fs.existsSync(dbPath)) {
+            if (!fs.existsSync(path.join(__dirname, 'data'))) fs.mkdirSync(path.join(__dirname, 'data'));
+            fs.writeFileSync(dbPath, JSON.stringify({}));
+        }
+        return JSON.parse(fs.readFileSync(dbPath, 'utf-8'));
+    },
+
+    gravar: (dados) => {
+        fs.writeFileSync(dbPath, JSON.stringify(dados, null, 4));
+    },
+
+    estaRegistrado: (id) => {
+        const dados = database.ler();
+        return !!dados[id];
+    },
+
+    obterUsuario: (id) => {
+        const dados = database.ler();
+        return dados[id] || null;
+    },
+
+    registrar: (id, nome) => {
+        const dados = database.ler();
+        if (dados[id]) return false;
+        dados[id] = { ...usuarioPadrao, nome: nome };
+        database.gravar(dados);
+        return true;
+    },
+
+    salvar: (id, novosDados) => {
+        const dados = database.ler();
+        if (!dados[id]) return null;
+        dados[id] = { ...dados[id], ...novosDados };
+        database.gravar(dados);
+        return dados[id];
+    },
+
+    ganharXP: async (id, quantidade, sock, msg) => {
+        let user = database.obterUsuario(id);
+        if (!user || user.level >= 100) return;
+        let novoXP = (user.xp || 0) + quantidade;
+        let novoLevel = user.level;
+        const xpNecessario = 100 * (novoLevel * novoLevel);
+        if (novoXP >= xpNecessario) {
+            novoLevel += 1; novoXP = 0;
+            const recompensa = 500 + (novoLevel * 100);
+            database.salvar(id, { level: novoLevel, xp: novoXP, dinheiro: (user.dinheiro || 0) + recompensa });
+            const layout = `🚀 *LEVEL UP!* @${id.split('@')[0]} subiu para o nível *${novoLevel}*!`;
+            await sock.sendMessage(msg.key.remoteJid, { text: layout, mentions: [id] });
+        } else {
+            database.salvar(id, { xp: novoXP });
+        }
+    }
+};
+
+module.exports = database;

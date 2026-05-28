@@ -1,0 +1,11 @@
+node_modules/
+*.mp4
+*.jpg
+*.png
+*.log
+logs/
+temp_*
+pedrinha_*
+views/
+web.js
+       

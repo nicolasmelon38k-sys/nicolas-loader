@@ -1,0 +1,64 @@
+[23/05/2026, 13:17:23] User: 554896669255 | Modelo: gemini-1.5-pro
+Prompt: Oi
+-----------------------
+[23/05/2026, 13:17:35] User: 554896669255 | Modelo: gemini-2.5-pro
+Prompt: Oi
+-----------------------
+[23/05/2026, 13:17:45] User: 554896669255 | Modelo: gemini-1.5-pro
+Prompt: Oi
+-----------------------
+[23/05/2026, 13:29:30] User: 554896669255 | Modelo: gemini-flash-latest
+Prompt: Oi
+-----------------------
+[23/05/2026, 13:30:04] User: 554896669255 | Modelo: gemini-flash-latest
+Prompt: Qual é o diamante mais raro do mundo
+-----------------------
+[23/05/2026, 13:32:27] User: 554896669255 | Modelo: gemini-3.1-pro-preview
+Prompt: Você é um engenheiro de software sênior especialista em Node.js, arquitetura de sistemas distribuídos e bots de alta performance.
+Crie um sistema completo de bot modular em Node.js (CommonJS) com arquitetura profissional, como se fosse usado em produção real.
+O sistema deve incluir:
+⚙️ 1. Arquitetura
+Estrutura totalmente modular (pastas: /commands, /events, /lib, /database, /middlewares)
+Sistema de carregamento automático de comandos (hot reload sem reiniciar servidor)
+Separação clara entre lógica, dados e eventos
+💾 2. Banco de dados
+Sistema de persistência em JSON (ou SQLite opcional)
+Funções globais: getUser, setUser, updateUser, deleteUser
+Controle de concorrência para evitar corrupção de dados
+🧠 3. Sistema de economia
+dinheiro, banco, cooldown de trabalho
+anti-dupe (bloqueio de exploração de saldo)
+logs de transações
+🎮 4. Sistema de RPG
+XP e level com fórmula de progressão exponencial
+inventário com itens stackáveis
+sistema de loot aleatório com raridade (comum, raro, épico, lendário)
+🏦 5. Sistema de clãs
+criar, entrar, sair, expulsar membros
+hierarquia (líder, vice, membro)
+banco do clã separado do jogador
+🔐 6. Segurança
+anti spam (rate limit por usuário)
+anti comando duplicado
+validação de entrada para evitar injection
+📡 7. Sistema de eventos
+event bus interno (emit/listen)
+logs centralizados
+🧩 8. Extras avançados
+sistema de plugins externos (carregar arquivos sem editar core)
+sistema de permissões (admin, user, owner)
+comandos administrativos ocultos
+📊 9. Logs e debug
+logs coloridos no terminal
+registro de erros sem crashar o bot (try/catch global)
+🧪 10. Qualidade
+código limpo, comentado e organizado
+sem dependências externas desnecessárias
+pronto pra rodar com node index.js
+🔥 IMPORTANTE:
+Não faça exemplo simples.
+Quero um sistema REAL, complexo e escalável.
+Pode gerar múltiplos arquivos completos.
+Foque em qualidade de engenharia, não em explicação.
+Se possível, inclua também um exemplo de comando funcional no final.
+-----------------------

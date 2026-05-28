@@ -1,0 +1,2880 @@
+const db = require('../db');
+const config = require('../config.json');
+
+module.exports = {
+    name: 'abandonar',
+    execute: async (sock, msg) => {
+        const id = msg.key.participant || msg.key.remoteJid;
+        const user = db.obterUsuario(id);
+
+        if (!user) {
+            return sock.sendMessage(msg.key.remoteJid, { text: '❌ Você ainda não está registrado.' }, { quoted: msg });
+        }
+
+        if (!user.emprego || user.emprego === 'Auxiliar Geral') {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `ℹ️ Você já está sem cargo.\nUse ${config.prefix || '!'}cargo para escolher um novo.`
+            }, { quoted: msg });
+        }
+
+        db.salvar(id, { emprego: 'Auxiliar Geral' });
+
+        await sock.sendMessage(msg.key.remoteJid, {
+            text: '✅ Cargo abandonado. Agora você está como *Auxiliar Geral*.'
+        }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const { executarRoubo } = require('../systems/heist');
+
+module.exports = {
+    name: 'aceitar-roubo',
+    execute: async (sock, msg, args) => {
+        const senderId = msg.key.participant;
+        const remetente = msg.key.remoteJid;
+        const user = db.obterUsuario(senderId);
+
+        // Verifica qual mensagem o cara respondeu
+        const quotedId = msg.message?.extendedTextMessage?.contextInfo?.stanzaId;
+        
+        if (!quotedId) {
+            return sock.sendMessage(remetente, { text: "⚠️ Você precisa RESPONDER à mensagem do convite do bot!" }, { quoted: msg });
+        }
+
+        global.activeHeists = global.activeHeists || new Map();
+        const heist = global.activeHeists.get(quotedId);
+
+        if (!heist) {
+            return sock.sendMessage(remetente, { text: "❌ Esse convite já expirou, foi cancelado ou o assalto já aconteceu." }, { quoted: msg });
+        }
+
+        if (!heist.convidados.includes(senderId)) {
+            return sock.sendMessage(remetente, { text: "⚠️ Você não foi chamado para esse assalto, espertinho!" }, { quoted: msg });
+        }
+
+        if (heist.aceitos.includes(senderId)) {
+            return sock.sendMessage(remetente, { text: "✅ Você já está com a máscara no rosto, aguarde os outros." }, { quoted: msg });
+        }
+
+        // Adiciona o jogador na equipe
+        heist.aceitos.push(senderId);
+        const totalFaltam = (heist.convidados.length + 1) - heist.aceitos.length;
+
+        if (totalFaltam === 0) {
+            // TODO MUNDO ACEITOU! VAMO NESSA!
+            clearTimeout(heist.timer); // Cancela o cronômetro pra não bugar
+            global.activeHeists.delete(quotedId); // Apaga o convite da memória
+            
+            await sock.sendMessage(remetente, { text: `🔥 *EQUIPE FORMADA!* Iniciando a operação...` }, { quoted: msg });
+            setTimeout(() => {
+                executarRoubo(sock, remetente, heist.tipo, heist.aceitos);
+            }, 2000); // Suspensezinho de 2 segundos kkkk
+        } else {
+            await sock.sendMessage(remetente, { text: `🔫 *${user.nome}* pegou as armas! Faltam ${totalFaltam} membro(s) aceitar(em).` }, { quoted: msg });
+        }
+    }
+};
+const db = require('../db');
+const config = require('../config.json');
+module.exports = {
+    name: 'admtest',
+    execute: async (sock, msg) => {
+        const reis = ['554896669255', '161830827753644'];
+        const remetente = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        if (!reis.includes(remetente)) return; // Trava Real
+
+        const p = config.prefix || '!';
+        const txt = `🔍 *DEBUG ADMIN*\n\n✅ Seu ID: ${remetente}\n✅ Prefixo Atual: ${p}\n✅ Acesso: Autorizado 👑`;
+        await sock.sendMessage(msg.key.remoteJid, { text: txt }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'afk',
+    execute: async (sock, msg, args) => {
+        let quemEnviouRaw = msg.key.fromMe ? "554896669255@s.whatsapp.net" : (msg.key.participant || msg.key.remoteJid);
+        const senderId = db.normalizarId(quemEnviouRaw);
+        const nome = msg.pushName || 'Usuário';
+
+        const motivo = args.join(' ').trim() || 'nenhum';
+        const timestamp = Date.now();
+
+        db.salvar(senderId, { 
+            afk: { status: true, motivo: motivo, desde: timestamp },
+            nome: nome 
+        });
+
+        const layout = `
+╭━━━━━━━『 💤 𝑴𝑶𝑫𝑶 𝑨𝑭𝑲 』━━━━━━━╮
+┃
+┃ ✅ *AFK registrado com sucesso!*
+┃ 👤 *Usuário:* ${nome}
+┃ 📝 *Motivo:* ${motivo}
+┃
+┃ _Sua ausência foi computada._
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(msg.key.remoteJid, { text: layout }, { quoted: msg });
+    }
+};
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const genAI = new GoogleGenerativeAI('AIzaSyAB39VOUSCZ4ZzG8Qiap0EiRO1nTYPPfk8');
+
+const modelosFallback = [
+    "gemini-2.5-flash",
+    "gemma-3-27b-it",
+    "gemini-flash-latest",
+    "gemini-3-flash-preview"
+];
+
+module.exports = {
+    name: 'ai',
+    execute: async (sock, msg, args) => {
+        const prompt = args.join(' ');
+        if (!prompt) return sock.sendMessage(msg.key.remoteJid, { text: "❌ Digite sua pergunta após o comando." });
+
+        let resposta = "";
+        let modeloUsado = "";
+        let fim = 0;
+        const inicio = Date.now();
+
+        // Tenta um por um até um responder
+        for (const modelName of modelosFallback) {
+            try {
+                const model = genAI.getGenerativeModel({ model: modelName });
+                const result = await model.generateContent(prompt);
+                resposta = result.response.text();
+                fim = Date.now() - inicio;
+                modeloUsado = modelName;
+                break; // Se respondeu, sai do loop
+            } catch (error) {
+                console.log(`⚠️ [IA] ${modelName} falhou/lotado. Pulando...`);
+            }
+        }
+
+        if (!resposta) {
+            return await sock.sendMessage(msg.key.remoteJid, { text: "❌ Falha crítica: Todos os servidores da IA estão sobrecarregados agora. Tente em 1 minuto." });
+        }
+
+        const layout = `
+╭━━━━━━━『 𝑫𝑨𝑬𝑴𝑶𝑵-𝑰𝑨 』━━━━━━━╮
+┃
+${resposta}
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 🛠️ *MODELO:* ${modeloUsado}
+┃ ⚡ *LATÊNCIA:* ${fim}ms
+┃ 🟢 *STATUS:* Operacional
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(msg.key.remoteJid, { text: layout }, { quoted: msg });
+    }
+};
+const fs = require('fs');
+const db = require('../db');
+
+module.exports = {
+    name: 'antilink',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        const isGroup = remetente.endsWith('@g.us');
+
+        if (!isGroup) {
+            return sock.sendMessage(remetente, { text: "❌ Esse comando só funciona dentro de grupos!" }, { quoted: msg });
+        }
+
+        const groupMetadata = await sock.groupMetadata(remetente);
+        // Pega todos os admins e normaliza o ID pra ficar só o número limpo (ex: 554896669255)
+        const admins = groupMetadata.participants.filter(p => p.admin === 'admin' || p.admin === 'superadmin').map(p => db.normalizarId(p.id));
+        
+        // 🔥 A REGRA DE DEUS: Se foi você que mandou do próprio celular do bot, aprova na hora!
+        let isAuthorized = false;
+        if (msg.key.fromMe) {
+            isAuthorized = true;
+        } else {
+            // Se for outra pessoa, checa se o número limpo dela tá na lista de ADMs
+            const senderId = db.normalizarId(msg.key.participant);
+            if (admins.includes(senderId)) {
+                isAuthorized = true;
+            }
+        }
+
+        // A marretada cai aqui se o cara for membro normal
+        if (!isAuthorized) {
+            return sock.sendMessage(remetente, { text: "❌ Quem mandou você tentar? Apenas Administradores podem mexer no Anti-Link!" }, { quoted: msg });
+        }
+
+        const gruposPath = './grupos.json';
+        if (!fs.existsSync(gruposPath)) fs.writeFileSync(gruposPath, JSON.stringify({}));
+        const grupos = JSON.parse(fs.readFileSync(gruposPath, 'utf8'));
+
+        if (!grupos[remetente]) grupos[remetente] = {};
+
+        const acao = args[0];
+
+        if (acao === '1') {
+            grupos[remetente].antilink = true;
+            fs.writeFileSync(gruposPath, JSON.stringify(grupos, null, 2));
+            await sock.sendMessage(remetente, { text: "🛡️ *ANTI-LINK ATIVADO!*\nMembros normais que enviarem link serão banidos instantaneamente." }, { quoted: msg });
+        } else if (acao === '0') {
+            grupos[remetente].antilink = false;
+            fs.writeFileSync(gruposPath, JSON.stringify(grupos, null, 2));
+            await sock.sendMessage(remetente, { text: "🔓 *ANTI-LINK DESATIVADO!*\nEnvio de links liberado para todos." }, { quoted: msg });
+        } else {
+            await sock.sendMessage(remetente, { text: "⚙️ *Como usar:*\nDigite *!antilink 1* para ativar.\nDigite *!antilink 0* para desativar." }, { quoted: msg });
+        }
+    }
+};
+const util = require('util');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+const execPromise = util.promisify(exec);
+
+module.exports = {
+    name: 'baixar',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        const url = args[0];
+        
+        if (!url) {
+            return sock.sendMessage(remetente, { text: "❌ Mande o link do vídeo!\n*Exemplo:* !baixar [link]" }, { quoted: msg });
+        }
+
+        const waitMsg = await sock.sendMessage(remetente, { text: "⏳ *Extraindo mídia...*\n_Buscando melhor qualidade disponível (H.264)..._ 🚀" }, { quoted: msg });
+        
+        const tempFile = path.join(__dirname, '..', `temp_video_${Date.now()}.mp4`);
+
+        try {
+            // Motor yt-dlp otimizado para H.264/60fps/4k
+            const cmd = `yt-dlp "${url}" -S "vcodec:h264,fps,res,acodec:m4a" --max-filesize 60M --merge-output-format mp4 -o "${tempFile}"`;
+            
+            await execPromise(cmd);
+
+            if (!fs.existsSync(tempFile)) {
+                throw new Error("Falha no download.");
+            }
+
+            await sock.sendMessage(remetente, {
+                video: fs.readFileSync(tempFile),
+                caption: `🎥 *Download Concluído!*\n_DAEMON Video Downloader System_`
+            }, { quoted: msg });
+
+            await sock.sendMessage(remetente, { delete: waitMsg.key });
+            fs.unlinkSync(tempFile);
+
+        } catch (error) {
+            console.error("Erro no downloader:", error);
+            let erroMsg = "❌ Erro ao baixar. O link pode ser privado ou o arquivo excede o limite do WhatsApp.";
+            await sock.sendMessage(remetente, { text: erroMsg }, { edit: waitMsg.key });
+            if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+        }
+    }
+};
+const db = require('../db');
+
+function money(valor) {
+    return `R$ ${Number(valor || 0).toLocaleString('pt-BR')}`;
+}
+
+function barraXp(xpAtual, xpNecessario) {
+    const total = 20;
+    const pct = xpNecessario > 0 ? Math.min(100, Math.max(0, (xpAtual / xpNecessario) * 100)) : 0;
+    const cheio = Math.round((pct / 100) * total);
+    return '█'.repeat(cheio) + '░'.repeat(total - cheio);
+}
+
+module.exports = {
+    name: 'banco',
+    execute: async (sock, msg, args) => {
+        const alvoBruto = args.join(' ').trim();
+        const id = alvoBruto
+            ? db.normalizarId(alvoBruto)
+            : db.normalizarId(msg.key.participant || msg.key.remoteJid);
+
+        const user = db.obterUsuario(id);
+        if (!user) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃            ❌ BANCO NÃO ENCONTRADO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+Esse usuário ainda não está registrado.`
+            }, { quoted: msg });
+        }
+
+        const nome = user.nome || msg.pushName || 'Usuário';
+        const dinheiro = Number(user.dinheiro || 0);
+        const banco = Number(user.banco || 0);
+        const total = dinheiro + banco;
+        const level = Number(user.level || 1);
+        const xpAtual = Number(user.xp || 0);
+        const xpNecessario = 100 * (level * level);
+        const faltaXP = Math.max(0, xpNecessario - xpAtual);
+        const emprego = user.emprego || 'Auxiliar Geral';
+        const status = user.status || 'Solteiro(a)';
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃           🏦 𝑩𝑨𝑵𝑪𝑶 𝑹𝑬𝑨𝑳 🏦           ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 𝑼𝒔𝒖́𝒂𝒓𝒊𝒐: ${nome}
+💼 𝑬𝒎𝒑𝒓𝒆𝒈𝒐: ${emprego}
+💞 𝑺𝒕𝒂𝒕𝒖𝒔: ${status}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 𝑪𝒂𝒓𝒕𝒆𝒊𝒓𝒂: ${money(dinheiro)}
+🏦 𝑩𝒂𝒏𝒄𝒐: ${money(banco)}
+💎 𝑻𝒐𝒕𝒂𝒍: ${money(total)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⭐ 𝑳𝒆𝒗𝒆𝒍: ${level} / 100
+✨ 𝑿𝑷: ${xpAtual.toLocaleString('pt-BR')} / ${xpNecessario.toLocaleString('pt-BR')}
+⏳ 𝑷𝒓𝒐𝒈𝒓𝒆𝒔𝒔𝒐: [${barraXp(xpAtual, xpNecessario)}]
+🕒 𝑭𝒂𝒍𝒕𝒂: ${faltaXP.toLocaleString('pt-BR')} XP
+
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const config = require('../config.json');
+
+const listaCargos = {
+    lixeiro: { nome: 'Lixeiro', lvl: 1 },
+    atendente: { nome: 'Atendente', lvl: 3 },
+    faxineiro: { nome: 'Faxineiro', lvl: 5 },
+    entregador: { nome: 'Entregador', lvl: 8 },
+    estoquista: { nome: 'Estoquista', lvl: 12 },
+    padeiro: { nome: 'Padeiro', lvl: 15 },
+    'caixa de loja': { nome: 'Caixa de Loja', lvl: 18 },
+    motorista: { nome: 'Motorista', lvl: 22 },
+    jardineiro: { nome: 'Jardineiro', lvl: 25 },
+    'gerente de loja': { nome: 'Gerente de Loja', lvl: 30 },
+    mecanico: { nome: 'Mecânico', lvl: 35 },
+    designer: { nome: 'Designer', lvl: 40 },
+    pedreiro: { nome: 'Pedreiro', lvl: 45 },
+    cozinheiro: { nome: 'Cozinheiro', lvl: 50 },
+    locutor: { nome: 'Locutor', lvl: 55 },
+    professor: { nome: 'Professor', lvl: 60 },
+    seguranca: { nome: 'Segurança', lvl: 65 },
+    enfermeiro: { nome: 'Enfermeiro', lvl: 70 },
+    empresario: { nome: 'Empresário', lvl: 75 },
+    cientista: { nome: 'Cientista', lvl: 85 }
+};
+
+function normalizar(texto) {
+    return String(texto || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim();
+}
+
+module.exports = {
+    name: 'cargo',
+    execute: async (sock, msg, args) => {
+        const id = msg.key.participant || msg.key.remoteJid;
+        const user = db.obterUsuario(id);
+        const prefix = config.prefix || '!';
+
+        if (!user) {
+            return sock.sendMessage(msg.key.remoteJid, { text: '❌ *ERRO:* Registro não encontrado.' }, { quoted: msg });
+        }
+
+        const escolha = normalizar(args.join(' '));
+        const userLvl = user.level || 1;
+
+        if (!escolha) {
+            const lista = Object.values(listaCargos)
+                .map(c => {
+                    const check = userLvl >= c.lvl ? '✅' : '🔒';
+                    return `${check} *${c.nome}* — _Lvl ${c.lvl}_`;
+                })
+                .join('\n');
+
+            const menuTexto = 
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃       💼 𝑴𝑬𝑹𝑪𝑨𝑫𝑶 𝑫𝑬 𝑻𝑹𝑨𝑩𝑨𝑳𝑯𝑶       ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 *𝑺𝒕𝒂𝒕𝒖𝒔 𝑨𝒕𝒖𝒂𝒍:*
+📊 Nível: ${userLvl}
+🛠️ Cargo: ${user.emprego || 'Desempregado'}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+${lista}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 *𝑼𝒔𝒐:* ${prefix}cargo nome-do-cargo
+⚠️ *𝑵𝒐𝒕𝒂:* Use ${prefix}abandonar para trocar.`;
+
+            return sock.sendMessage(msg.key.remoteJid, { text: menuTexto }, { quoted: msg });
+        }
+
+        if (user.emprego && user.emprego !== 'Auxiliar Geral' && user.emprego !== 'Desempregado') {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `❌ *ERRO:* Você já é *${user.emprego}*.\n\nUse ${prefix}abandonar antes de tentar um novo cargo.`
+            }, { quoted: msg });
+        }
+
+        const cargo = listaCargos[escolha];
+
+        if (!cargo) {
+            return sock.sendMessage(msg.key.remoteJid, { 
+                text: `❌ *ERRO:* Cargo não encontrado!\nDigite *${prefix}cargo* para ver a lista.` 
+            }, { quoted: msg });
+        }
+
+        if (userLvl < cargo.lvl) {
+            return sock.sendMessage(msg.key.remoteJid, { 
+                text: `🚫 *𝑵𝑰́𝑽𝑬𝑳 𝑰𝑵𝑺𝑼𝑭𝑰𝑪𝑰𝑬𝑵𝑻𝑬*\n\nVocê precisa de nível *${cargo.lvl}* para ser *${cargo.nome}*.\nSeu nível atual: *${userLvl}*` 
+            }, { quoted: msg });
+        }
+
+        db.salvar(id, { emprego: cargo.nome });
+
+        const sucessoTexto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃      🎉 𝑵𝑶𝑽𝑶 𝑬𝑴𝑷𝑹𝑬𝑮𝑶 🎉      ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+✅ Parabéns! Agora você é:
+⭐ *${cargo.nome.toUpperCase()}*
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚀 Próximo passo: Use *${prefix}trabalhar*
+para começar a faturar!`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: sucessoTexto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+// 🔥 SISTEMA DE LOCK (Fica na memória RAM, ultra rápido)
+const activeLocks = new Set();
+
+module.exports = {
+    name: 'cassino',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        const id = db.normalizarId(msg.key.participant || remetente);
+
+        // 1. VERIFICA O LOCK (Se tiver rodando, barra na hora)
+        if (activeLocks.has(id)) {
+            return await sock.sendMessage(remetente, { react: { text: "⏳", key: msg.key } });
+        }
+
+        let user = db.obterUsuario(id);
+        if (!user) return;
+
+        const aposta = parseInt(args[0]);
+        if (isNaN(aposta) || aposta < 100) {
+            return await sock.sendMessage(remetente, { text: "❌ *Erro:* A aposta mínima é R$ 100." }, { quoted: msg });
+        }
+
+        if ((user.dinheiro || 0) < aposta) {
+            return await sock.sendMessage(remetente, { text: "❌ *Saldo insuficiente!*" }, { quoted: msg });
+        }
+
+        // 2. ATIVA O LOCK (Tranca o usuário)
+        activeLocks.add(id);
+
+        try {
+            // 3. DEBITA O SALDO IMEDIATAMENTE (Anti-Spam)
+            user.dinheiro -= aposta;
+            db.salvar(id, user); 
+
+            // Sorteio
+            const emojis = ['🍒', '🍋', '🍉', '🍇', '🔔', '⭐', '💎', '7️⃣'];
+            const coracoes = ['❤️', '🧡', '💛', '💚', '💙', '💜', '🖤'];
+            const chance = Math.random() * 100;
+            let multiplicador = 0;
+            let finalSlots = [];
+
+            if (chance < 2) { multiplicador = 10; finalSlots = ['7️⃣', '7️⃣', '7️⃣']; }
+            else if (chance < 10) { multiplicador = 3; finalSlots = ['💎', '💎', '💎']; }
+            else if (chance < 25) { multiplicador = 2; const e = emojis[Math.floor(Math.random() * 4)]; finalSlots = [e, e, e]; }
+            else if (chance < 45) {
+                multiplicador = 1;
+                const e = emojis[Math.floor(Math.random() * emojis.length)];
+                let e2 = emojis[Math.floor(Math.random() * emojis.length)];
+                while(e === e2) e2 = emojis[Math.floor(Math.random() * emojis.length)];
+                finalSlots = [e, e, e2].sort(() => Math.random() - 0.5);
+            } else {
+                multiplicador = 0;
+                while(finalSlots.length < 3) {
+                    const e = emojis[Math.floor(Math.random() * emojis.length)];
+                    if(!finalSlots.includes(e)) finalSlots.push(e);
+                }
+            }
+
+            const ganho = aposta * multiplicador;
+
+            const buildLayout = (s1, s2, s3, statusTexto) => `
+╭━━━━━━━『 🎰 𝑪𝑨𝑺𝑺𝑰𝑵𝑶 』━━━━━━━╮
+┃
+┃   [ ${s1} | ${s2} | ${s3} ]
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 👤 *Apostador:* ${msg.pushName || "Jogador"}
+┃ 💸 *Aposta:* R$ ${aposta.toLocaleString('pt-BR')}
+┃ 
+┃ ${statusTexto}
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+            // 4. ANIMAÇÃO
+            const sentMsg = await sock.sendMessage(remetente, { 
+                text: buildLayout('🔄', '🔄', '🔄', "⏳ *RODANDO OS SLOTS...*") 
+            }, { quoted: msg });
+
+            for (let i = 0; i < 4; i++) {
+                const coracao = coracoes[Math.floor(Math.random() * coracoes.length)];
+                await sock.sendMessage(remetente, { react: { text: coracao, key: sentMsg.key } });
+                await new Promise(r => setTimeout(r, 400));
+                
+                const r1 = emojis[Math.floor(Math.random() * emojis.length)];
+                const r2 = emojis[Math.floor(Math.random() * emojis.length)];
+                const r3 = emojis[Math.floor(Math.random() * emojis.length)];
+                
+                await sock.sendMessage(remetente, { 
+                    text: buildLayout(r1, r2, r3, "⏳ *RODANDO OS SLOTS...*"), 
+                    edit: sentMsg.key 
+                });
+            }
+
+            // 5. ATUALIZA SALDO FINAL
+            let userFinal = db.obterUsuario(id); 
+            if (ganho > 0) {
+                userFinal.dinheiro += ganho;
+                db.salvar(id, userFinal);
+            }
+
+            let statusFinal = "";
+            let emojiFinal = "";
+            if (multiplicador === 0) {
+                statusFinal = `❌ *PERDEU TUDO!*\nA casa sempre ganha.`;
+                emojiFinal = "💀";
+            } else if (multiplicador === 1) {
+                statusFinal = `⚖️ *EMPATE!*\nRecuperou seus R$ ${ganho.toLocaleString('pt-BR')}.`;
+                emojiFinal = "⚖️";
+            } else {
+                statusFinal = `🎉 *GANHOU ${multiplicador}X!*\n💰 *Prêmio:* R$ ${ganho.toLocaleString('pt-BR')}`;
+                emojiFinal = "💰";
+            }
+
+            statusFinal += `\n💳 *Saldo:* R$ ${userFinal.dinheiro.toLocaleString('pt-BR')}`;
+
+            await sock.sendMessage(remetente, { react: { text: emojiFinal, key: sentMsg.key } });
+            await new Promise(r => setTimeout(r, 300));
+            await sock.sendMessage(remetente, { 
+                text: buildLayout(finalSlots[0], finalSlots[1], finalSlots[2], statusFinal), 
+                edit: sentMsg.key 
+            });
+
+        } catch (error) {
+            console.log("❌ Erro no Cassino:", error);
+        } finally {
+            // 6. LIBERA O LOCK DE QUALQUER JEITO
+            activeLocks.delete(id);
+        }
+    }
+};
+const db = require('../db');
+const produtos = require('../data/produtos');
+const receitas = require('../data/receitas');
+
+module.exports = {
+    name: 'comer',
+    execute: async (sock, msg, args) => {
+        const idItem = args[0];
+        const remetente = msg.key.remoteJid;
+        const id = db.normalizarId(msg.key.participant || remetente);
+        const user = db.obterUsuario(id);
+
+        if (!user || !user.inventario) return;
+
+        let item = produtos[idItem];
+        let isPrato = false;
+
+        if (!item && receitas[idItem]) {
+            item = receitas[idItem];
+            isPrato = true;
+        }
+
+        if (!item) return sock.sendMessage(remetente, { text: "❌ ID inválido. Olhe os IDs no !inventario." }, { quoted: msg });
+
+        const index = user.inventario.indexOf(item.nome);
+        if (index === -1) {
+            return sock.sendMessage(remetente, { text: `❌ Você não tem *${item.nome}* na mochila!` }, { quoted: msg });
+        }
+
+        let fomeAtual = user.fome !== undefined ? user.fome : 100;
+        if (fomeAtual >= 100) {
+            return sock.sendMessage(remetente, { text: `🛑 Você já está de barriga cheia! (100/100)` }, { quoted: msg });
+        }
+
+        // Tira 1 da mochila
+        user.inventario.splice(index, 1);
+
+        // LÓGICA DO QUE É COMESTÍVEL OU NÃO
+        // IDs Tech (31-40) e Lar (41-54)
+        const idNum = parseInt(idItem);
+        const isInedible = (idNum >= 31 && idNum <= 54);
+        
+        if (isInedible) {
+            // Penalidade por comer lixo!
+            let multa = 500;
+            let cobrado = 0;
+            if ((user.dinheiro || 0) >= multa) {
+                user.dinheiro -= multa;
+                cobrado = multa;
+            } else {
+                cobrado = user.dinheiro || 0;
+                let resto = multa - cobrado;
+                user.dinheiro = 0;
+                user.divida = (user.divida || 0) + resto;
+            }
+            db.salvar(id, user);
+            return sock.sendMessage(remetente, { text: `🤢 *ECA!* Você tentou mastigar *${item.nome}* e quebrou os dentes!\n\n🏥 *Conta do Hospital/Dentista:* R$ 500,00\n💸 Dinheiro cobrado na hora: R$ ${cobrado}\n🚨 Dívida pendente (SPC): R$ ${multa - cobrado}` }, { quoted: msg });
+        }
+
+        // Recuperação de Fome: Pratos feitos curam mais que os ingredientes crus.
+        let recupera = 0;
+        if (isPrato) recupera = 50; // Pratos Restauram Metade da fome
+        else if (idNum >= 11 && idNum <= 20) recupera = 30; // Carnes
+        else recupera = 15; // Frutas e Hortifruti
+
+        fomeAtual = Math.min(100, fomeAtual + recupera);
+        user.fome = fomeAtual;
+        db.salvar(id, user);
+
+        await sock.sendMessage(remetente, { text: `😋 Você saboreou *${item.nome}*!\n🍗 Fome saciada: +${recupera}\n📊 Fome atual: ${fomeAtual}/100` }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const produtos = require('../data/produtos');
+const receitas = require('../data/receitas');
+
+module.exports = {
+    name: 'comprar',
+    execute: async (sock, msg, args) => {
+        const idItem = args[0];
+        const remetente = msg.key.remoteJid;
+        const userId = db.normalizarId(msg.key.participant || remetente);
+        const user = db.obterUsuario(userId);
+
+        let item = produtos[idItem];
+        let isPrato = false;
+        let precoItem = 0;
+
+        if (!item && receitas[idItem]) {
+            item = receitas[idItem];
+            isPrato = true;
+            
+            // Taxa de Preguiça (Custa o dobro de fazer em casa)
+            let custo = 0;
+            item.ingredientes.forEach(ingNome => {
+                const ingId = Object.keys(produtos).find(k => produtos[k].nome === ingNome);
+                if (ingId && produtos[ingId].preco) custo += produtos[ingId].preco;
+            });
+            precoItem = Math.floor(custo * 2);
+            if (precoItem === 0) precoItem = 30;
+        } else if (item) {
+            precoItem = item.preco;
+        }
+
+        if (!item) return sock.sendMessage(remetente, { text: "❌ ID de produto inválido! Veja a !loja ou !loja2." });
+
+        if ((user.dinheiro || 0) < precoItem) {
+            return sock.sendMessage(remetente, { text: `❌ Saldo insuficiente! Custa R$ ${precoItem.toLocaleString('pt-BR')}.` }, { quoted: msg });
+        }
+        
+        user.dinheiro -= precoItem;
+
+        if (!user.inventario) user.inventario = [];
+        user.inventario.push(item.nome);
+
+        db.salvar(userId, user);
+
+        let txt = isPrato 
+            ? `🍱 Você comprou o prato pronto *${item.nome}* por R$ ${precoItem.toLocaleString('pt-BR')}!\n_Dica: Se tivesse cozinhado com os ingredientes saía pela metade do preço!_`
+            : `✅ Você comprou *${item.nome}* por R$ ${precoItem.toLocaleString('pt-BR')}!\nUse *!inventario* para ver a mochila.`;
+
+        await sock.sendMessage(remetente, { text: txt }, { quoted: msg });
+    }
+};
+module.exports = {
+    name: 'configai',
+    execute: async (sock, msg, args) => {
+        // Dados técnicos reais da arquitetura Gemini/Gemma em 2026
+        const configTexto = `
+╭━━━━━━━『 𝑺𝑷𝑬𝑪𝑺 𝑫𝑨 𝑰𝑨 』━━━━━━━╮
+┃
+┃ 📂 *NOME:* Gemini 2.5 Flash
+┃ 🔬 *ARQUITETURA:* Transformer-based (MoE)
+┃ 🧠 *PARÂMETROS:* ~1.2 Trilhões (estimado)
+┃ 🧬 *NEURÔNIOS:* Camadas de atenção multi-head
+┃
+┃ 💻 *INFRAESTRUTURA (Google Cloud):*
+┃ ⚙️ *TPU:* v5p / v6 Pods
+┃ 🌐 *LOCAL:* North America / Global Edge
+┃ 📂 *CONTEXTO:* 1M - 2M tokens
+┃
+┃ 📊 *LIMITES DA API:*
+┃ ⟫ RPM: 15 (Grátis)
+┃ ⟫ RPD: 1500 (Grátis)
+┃ ⟫ TPM: 1,000,000
+┃
+┃ 🛡️ *SEGURANÇA:* Híbrida (Filtros Ativos)
+┃ 🕒 *VERSÃO:* v1beta-2026-04
+┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(msg.key.remoteJid, { text: configTexto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'dados',
+    execute: async (sock, msg, args) => {
+        // 👑 Agora só tem o seu número real aqui
+        const reis = ['554896669255'];
+
+        let quemPediuRaw = msg.key.fromMe ? sock.user.id : (msg.key.participant || msg.key.remoteJid);
+        const remetente = db.normalizarId(quemPediuRaw);
+
+        const isDono = reis.some(numeroBase => remetente.startsWith(numeroBase));
+
+        if (!isDono) return;
+
+        try {
+            const dados = db.ler();
+            const alvoBruto = args.join(' ').trim();
+            const alvoId = alvoBruto ? db.normalizarId(alvoBruto) : null;
+
+            const limparUser = (u) => {
+                if (!u) return null;
+                const limpo = { ...u };
+                delete limpo.ultimoDaily;
+                delete limpo.jogadasTigrinho;
+                delete limpo.tempoAtivo;
+                delete limpo.ledger;
+                return limpo;
+            };
+
+            if (alvoId) {
+                const chaveExata = Object.keys(dados).find(key => key.startsWith(alvoId));
+                const user = chaveExata ? dados[chaveExata] : null;
+
+                if (!user) {
+                    return sock.sendMessage(msg.key.remoteJid, {
+                        text: '❌ Usuário não encontrado no DB.'
+                    }, { quoted: msg });
+                }
+
+                return sock.sendMessage(msg.key.remoteJid, {
+                    text: JSON.stringify(limparUser(user), null, 2)
+                }, { quoted: msg });
+            }
+
+            const dbLimpo = {};
+            for (let id in dados) {
+                dbLimpo[id] = limparUser(dados[id]);
+            }
+
+            await sock.sendMessage(msg.key.remoteJid, {
+                text: JSON.stringify(dbLimpo, null, 2)
+            }, { quoted: msg });
+
+        } catch (err) {
+            console.error('Erro no !dados:', err);
+        }
+    }
+};
+const db = require('../db');
+
+function money(valor) {
+    return `R$ ${Number(valor || 0).toLocaleString('pt-BR')}`;
+}
+
+module.exports = {
+    name: 'depositar',
+    execute: async (sock, msg, args) => {
+        const id = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        const user = db.obterUsuario(id);
+        if (!user) return;
+
+        const valorBruto = args[0];
+        if (!valorBruto) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         ❌ DEPÓSITO INVÁLIDO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+Use assim:
+!depositar 1000`
+            }, { quoted: msg });
+        }
+
+        const valor = Number(String(valorBruto).replace(/\D/g, '').slice(0, 15));
+        if (!Number.isFinite(valor) || valor <= 0) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         ❌ VALOR INVÁLIDO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+Digite um número maior que zero.`
+            }, { quoted: msg });
+        }
+
+        const carteira = Number(user.dinheiro || 0);
+        const banco = Number(user.banco || 0);
+
+        if (valor > carteira) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         ❌ SALDO INSUFICIENTE
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+💰 Carteira: ${money(carteira)}
+🏦 Banco: ${money(banco)}
+
+Você não tem esse valor na carteira.`
+            }, { quoted: msg });
+        }
+
+        const novoDinheiro = carteira - valor;
+        const novoBanco = banco + valor;
+
+        db.salvar(id, {
+            dinheiro: novoDinheiro,
+            banco: novoBanco
+        });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃           💳 𝑫𝑬𝑷Ó𝑺𝑰𝑻𝑶 𝑹𝑬𝑨𝑳
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 Usuário: ${user.nome || msg.pushName || 'Usuário'}
+➕ Depositado: ${money(valor)}
+💰 Carteira: ${money(novoDinheiro)}
+🏦 Banco: ${money(novoBanco)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✔ Operação concluída com sucesso`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const config = require('../config.json');
+
+module.exports = {
+    name: 'empregos',
+    execute: async (sock, msg) => {
+        const p = config.prefix || '!';
+
+        const menuEmpregos = `
+╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃             💼 ${p}EMPREGOS 💼              ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+🌸 Catálogo de trabalhos
+
+🪠 [Lvl 1]  Lixeiro         ⟫ R$ 120-220
+🛍️ [Lvl 3]  Atendente       ⟫ R$ 140-240
+🧹 [Lvl 5]  Faxineiro       ⟫ R$ 160-260
+📦 [Lvl 8]  Entregador      ⟫ R$ 180-300
+🏗️ [Lvl 12] Estoquista      ⟫ R$ 220-360
+🥖 [Lvl 15] Padeiro         ⟫ R$ 260-420
+🛒 [Lvl 18] Caixa de Loja   ⟫ R$ 300-500
+🚚 [Lvl 22] Motorista       ⟫ R$ 380-650
+🌻 [Lvl 25] Jardineiro      ⟫ R$ 450-750
+👔 [Lvl 30] Gerente de Loja ⟫ R$ 700-1100
+🔧 [Lvl 35] Mecânico        ⟫ R$ 850-1350
+🎨 [Lvl 40] Designer        ⟫ R$ 1000-1600
+🧱 [Lvl 45] Pedreiro        ⟫ R$ 1200-1900
+👨‍🍳 [Lvl 50] Cozinheiro     ⟫ R$ 1400-2200
+🎙️ [Lvl 55] Locutor         ⟫ R$ 1700-2600
+📚 [Lvl 60] Professor       ⟫ R$ 2000-3000
+🛡️ [Lvl 65] Segurança       ⟫ R$ 2300-3400
+🏥 [Lvl 70] Enfermeiro      ⟫ R$ 2600-3800
+💰 [Lvl 75] Empresário      ⟫ R$ 3000-4500
+🧬 [Lvl 85] Cientista       ⟫ R$ 3400-5000
+
+💡 Use: ${p}cargo nome-do-cargo
+Exemplo: ${p}cargo lixeiro
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(msg.key.remoteJid, { text: menuEmpregos }, { quoted: msg });
+    }
+};
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const util = require('util');
+const execPromise = util.promisify(exec);
+
+module.exports = {
+    name: 'f',
+    execute: async (sock, msg, args) => {
+        try {
+            let messageContent = msg.message;
+
+            if (msg.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+                messageContent = msg.message.extendedTextMessage.contextInfo.quotedMessage;
+            }
+
+            const getMedia = (m) => {
+                if (m?.videoMessage) return m.videoMessage;
+                if (m?.ptvMessage) return m.ptvMessage;
+                return null;
+            };
+
+            const target = getMedia(messageContent);
+
+            if (!target) {
+                return await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ *DAEMON-XBOT:* Não achei o vídeo/GIF." }, { quoted: msg });
+            }
+
+            if (target.fileLength && Number(target.fileLength) > 15 * 1024 * 1024) {
+                return await sock.sendMessage(msg.key.remoteJid, { text: "❌ *ERRO:* Vídeo muito grande." }, { quoted: msg });
+            }
+
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "⏳", key: msg.key } });
+
+            const stream = await downloadContentFromMessage(target, 'video');
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
+
+            const workDir = process.cwd();
+            const timestamp = Date.now();
+            const input = path.join(workDir, `temp_vid_in_${timestamp}.mp4`);
+            const output = path.join(workDir, `temp_vid_out_${timestamp}.webp`);
+            const exif = path.join(workDir, `temp_meta_${timestamp}.exif`);
+
+            fs.writeFileSync(input, buffer);
+
+            // 🔥 CORTAR E PREENCHER (SEM BORDAS) + COMPRESSÃO EXTREMA
+            // 'increase' escala até preencher o quadrado, depois 'crop' corta o centro 512x512
+            const filter = `"fps=10,scale=512:512:force_original_aspect_ratio=increase,crop=512:512"`;
+            // Mantendo compressão agressiva pro Zap aceitar figurinhas com muita ação
+            const ffmpegCmd = `ffmpeg -i "${input}" -vcodec libwebp -vf ${filter} -lossless 0 -q:v 15 -loop 0 -preset default -an -vsync 0 -t 00:00:05 "${output}"`;
+
+            await execPromise(ffmpegCmd);
+
+            const nomeUsuario = msg.pushName || "Utilizador";
+            const exifData = {
+                "sticker-pack-id": "daemonx.bot.video",
+                "sticker-pack-name": "DAEMON-XBOT",
+                "sticker-pack-publisher": `${nomeUsuario} | DAEMON-XBOT`
+            };
+
+            const exifHeader = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
+            const jsonBuffer = Buffer.from(JSON.stringify(exifData), 'utf8');
+            const exifFinal = Buffer.concat([exifHeader, jsonBuffer]);
+            exifFinal.writeUIntLE(jsonBuffer.length, 14, 4);
+            fs.writeFileSync(exif, exifFinal);
+
+            await execPromise(`webpmux -set exif "${exif}" "${output}" -o "${output}"`);
+
+            await sock.sendMessage(msg.key.remoteJid, { sticker: fs.readFileSync(output) }, { quoted: msg });
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "✅", key: msg.key } });
+
+            setTimeout(() => {
+                [input, output, exif].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+            }, 3000);
+
+        } catch (e) {
+            console.error("ERRO NO STICKER ANIMADO:", e.message);
+            await sock.sendMessage(msg.key.remoteJid, { text: "❌ *DAEMON:* O vídeo ficou pesado demais com o corte, tenta um vídeo com menos ação." }, { quoted: msg });
+        }
+    }
+}
+const db = require('../db');
+const receitas = require('../data/receitas');
+
+module.exports = {
+    name: 'fazer',
+    execute: async (sock, msg, args) => {
+        const idRec = args[0];
+        const rec = receitas[idRec];
+        const remetente = msg.key.remoteJid;
+        const id = db.normalizarId(msg.key.participant || remetente);
+        const user = db.obterUsuario(id);
+
+        if (!rec) return sock.sendMessage(remetente, { text: "❌ ID de receita inválido. Veja o !manual-receitas" });
+
+        // Verifica se tem todos os ingredientes exatos na mochila
+        const temTudo = rec.ingredientes.every(ing => user.inventario && user.inventario.includes(ing));
+
+        if (!temTudo) {
+            return sock.sendMessage(remetente, { text: `❌ Faltam ingredientes na sua mochila!\n📖 *Você precisa de:* ${rec.ingredientes.join(" + ")}` }, { quoted: msg });
+        }
+
+        // Tira 1 unidade de cada ingrediente usado
+        rec.ingredientes.forEach(ing => {
+            const index = user.inventario.indexOf(ing);
+            user.inventario.splice(index, 1);
+        });
+
+        // Coloca a porção feita no inventário
+        user.inventario.push(rec.nome);
+        db.salvar(id, user);
+
+        await sock.sendMessage(remetente, { 
+            text: `👨‍🍳 *FOGÃO ACESO!*\n\n✅ Sucesso! Você preparou: *${rec.nome}*!\nO prato já foi guardado no seu inventário e você pode vendê-lo mais caro ou guardar.` 
+        }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'gerarchave',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        
+        // Agora o bot sabe quem é você de verdade
+        let quemEnviouRaw = msg.key.fromMe ? sock.user.id : (msg.key.participant || remetente);
+        const userId = db.normalizarId(quemEnviouRaw);
+        
+        let user = db.obterUsuario(userId);
+        if (!user) return;
+
+        // Se a chave existe E não é o texto "Não gerada", ele bloqueia
+        if (user.chavePix && user.chavePix !== "Não gerada") {
+            return await sock.sendMessage(remetente, { 
+                text: `❌ Você já possui uma chave PIX registrada: *${user.chavePix}*` 
+            }, { quoted: msg });
+        }
+
+        const caracteres = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        let chaveGerada = '';
+        let chaveExiste = true;
+
+        const usuarios = db.ler();
+        while (chaveExiste) {
+            chaveGerada = '';
+            for (let i = 0; i < 6; i++) {
+                chaveGerada += caracteres.charAt(Math.floor(Math.random() * caracteres.length));
+            }
+            chaveExiste = Object.values(usuarios).some(u => u.chavePix === chaveGerada);
+        }
+
+        db.salvar(userId, { chavePix: chaveGerada });
+
+        const layout = `
+╭━━━━━━━『 🔑 𝑷𝑰𝑿-𝑲𝑬𝒀 』━━━━━━━╮
+┃
+┃ ✅ *Chave Gerada com Sucesso!*
+┃ 👤 *Titular:* ${user.nome}
+┃ 🔑 *Chave:* ${chaveGerada}
+┃ 
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ ⚠️ *Atenção:* Esta chave é única e 
+┃ vinculada ao seu perfil para sempre.
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(remetente, { text: layout }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const produtos = require('../data/produtos');
+const receitas = require('../data/receitas');
+
+const categoriasConfig = {
+    "🍎 Frutas": ["Maçã Fuji","Laranja Pera","Melancia Baby","Banana Nanica","Morango (250g)","Uva Thompson","Abacaxi Pérola","Manga Palmer","Pêssego","Limão Tahiti"],
+    "🥩 Carnes": ["Carne de Porco","Carne de Boi","Costela de Porco","Frango Inteiro","Linguiça Toscana","Bacon","Salsicha","Hambúrguer (10x)","Coxinha de Frango","Pastel de Carne"],
+    "🥗 Hortifruti": ["Alface Americana","Tomate","Cebola","Batata","Cenoura","Pepino","Brócolis","Couve-flor","Espinafre","Abobrinha"],
+    "🍱 Pratos Preparados": [
+        "Tigela de Salada de Maçã e Uva", "Travessa de Salada de Frutas", "Jarra de Vitamina de Banana c/ Morango", 
+        "Jarra de Suco Cítrico", "Jarra de Suco de Melancia", "Porção de Manga com Limão", "Bowl de Frutas Premium",
+        "Travessa de Salada Tropical", "Frango Assado c/ Legumes (Família)", "Frango Assado Acebolado",
+        "Costela Assada c/ Batatas", "Picadinho de Carne Acebolado", "Refogado de Porco c/ Abobrinha",
+        "Porção de Linguiça Acebolada", "Batata Rústica c/ Bacon", "Combo de 10 Hambúrgueres Artesanais",
+        "Combo de 10 Hambúrgueres c/ Salada", "Lanche Rápido: Coxinha + Suco", "Lanche Rápido: Pastel c/ Limão",
+        "Travessa de Salada Básica", "Travessa de Salada Crocante", "Panela de Legumes no Vapor",
+        "Porção de Brócolis e Couve-flor", "Porção de Espinafre Refogado", "Refogado de Abobrinha c/ Tomate",
+        "Mega Salada da Horta", "Carne Bovina c/ Legumes", "Frango Fit c/ Legumes", "Carne de Porco c/ Purê e Couve",
+        "Banquete Fast-Food (10 Pessoas)"
+    ],
+    "📱 Tech": ["Galaxy A54","Moto G53","Notebook Dell","Fone JBL","Caixa de Som","Power Bank","Cabo USB-C","Adaptador","Mi Band 8","Teclado Sem Fio"],
+    "🏠 Lar": ["Detergente","Sabão em Pó","Amaciante","Água Sanitária","Desinfetante","Papel Higiênico","Saco de Lixo","Esponja (5x)","Pano de Chão","Vassoura","Rodo","Balde","Lâmpada LED","Pilhas AA (4x)"]
+};
+
+module.exports = {
+    name: 'inventario',
+    execute: async (sock, msg) => {
+        const remetente = msg.key.remoteJid;
+        const userId = db.normalizarId(msg.key.participant || remetente);
+        const user = db.obterUsuario(userId);
+
+        if (!user || !user.inventario || user.inventario.length === 0) {
+            return sock.sendMessage(remetente, { text: "🎒 Sua mochila está vazia." }, { quoted: msg });
+        }
+
+        const contagem = {};
+        user.inventario.forEach(i => {
+            if (!i) return;
+            contagem[i] = (contagem[i] || 0) + 1;
+        });
+
+        const categorias = {
+            "🍎 Frutas": [], "🥩 Carnes": [], "🥗 Hortifruti": [], "🍱 Pratos Preparados": [], 
+            "📱 Tech": [], "🏠 Lar": [], "📦 Outros": []
+        };
+
+        for (const [nomeItem, qtd] of Object.entries(contagem)) {
+            // A mágica que resolve o erro [N/A]
+            const idProd = Object.keys(produtos).find(k => produtos[k] && produtos[k].nome === nomeItem);
+            const idRec = Object.keys(receitas).find(k => receitas[k] && receitas[k].nome === nomeItem);
+            const id = idProd || idRec || "N/A";
+            
+            let achou = false;
+
+            for (const [cat, lista] of Object.entries(categoriasConfig)) {
+                if (lista.includes(nomeItem)) {
+                    categorias[cat].push(`┃ ⟫ [${id}] ${nomeItem} (x${qtd})`);
+                    achou = true;
+                    break;
+                }
+            }
+            if (!achou) {
+                categorias["📦 Outros"].push(`┃ ⟫ [${id}] ${nomeItem} (x${qtd})`);
+            }
+        }
+
+        let msgInv = `╭━━━━━━━『 🎒 INVENTÁRIO 』━━━━━━━╮\n┃ 👤 ${msg.pushName || 'Jogador'}\n┃ 📦 Total: ${user.inventario.length}\n┃\n┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n┃\n`;
+        for (const [cat, itens] of Object.entries(categorias)) {
+            if (itens.length) {
+                msgInv += `┃ ${cat}\n${itens.join("\n")}\n┃\n`;
+            }
+        }
+        msgInv += `╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`;
+
+        await sock.sendMessage(remetente, { text: msgInv }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const { pegarNome } = require('../utils/_util');
+
+module.exports = {
+    name: 'level',
+    execute: async (sock, msg, args) => {
+        const reis = ['554896669255', '161830827753644'];
+        const remetente = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        if (!reis.includes(remetente)) return;
+
+        const info = msg.message?.extendedTextMessage?.contextInfo || {};
+        let alvoId, valorBruto;
+
+        if (info?.quotedMessage) {
+            alvoId = db.normalizarId(info.participant);
+            valorBruto = args[0];
+        } else if (info?.mentionedJid?.[0]) {
+            alvoId = db.normalizarId(info.mentionedJid[0]);
+            valorBruto = args[1];
+        } else {
+            alvoId = remetente;
+            valorBruto = args[0];
+        }
+
+        const lvlAdd = Number(String(valorBruto).replace(/\D/g, '').slice(0, 15));
+        if (!Number.isFinite(lvlAdd) || lvlAdd <= 0) return;
+
+        const user = db.obterUsuario(alvoId);
+        if (!user) return;
+
+        const levelAtual = Number(user.level || 1);
+        const novoLvl = Math.min(levelAtual + lvlAdd, 100);
+        const nome = await pegarNome(sock, alvoId);
+
+        db.salvar(alvoId, { level: novoLvl });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         ⭐ LEVEL ATUALIZADO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 Usuário: ${nome}
+⬆ Nível anterior: ${levelAtual}
+🎯 Novo nível: ${novoLvl}
+📌 Status: promoção aplicada`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+module.exports = {
+    name: 'loja',
+    execute: async (sock, msg, args) => {
+        const textoLoja = `
+╭━━━━━━━『 🛒 𝑫𝑨𝑬𝑴𝑶𝑵-𝑺𝑯𝑶𝑷 』━━━━━━━╮
+┃
+┃ 🍎 *𝐹𝓇𝓊𝓉𝒶𝓈 𝐹𝓇𝑒𝓈𝓆𝓊𝒾𝓃𝒽𝒶𝓈*
+┃ ⟫ 1. Maçã Fuji - R$ 3,50
+┃ ⟫ 2. Laranja Pera - R$ 2,80
+┃ ⟫ 3. Melancia Baby - R$ 8,00
+┃ ⟫ 4. Banana Nanica - R$ 4,00
+┃ ⟫ 5. Morango (250g) - R$ 7,50
+┃ ⟫ 6. Uva Thompson - R$ 6,00
+┃ ⟫ 7. Abacaxi Pérola - R$ 6,50
+┃ ⟫ 8. Manga Palmer - R$ 5,00
+┃ ⟫ 9. Pêssego - R$ 7,00
+┃ ⟫ 10. Limão Tahiti - R$ 2,00
+┃
+┃ 🥩 *ℂ𝕒𝕣𝕟𝕖𝕤 & ℂ𝕠𝕞𝕡𝕒𝕟𝕙𝕚𝕒𝕤*
+┃ ⟫ 11. Carne de Porco - R$ 22,00
+┃ ⟫ 12. Carne de Boi - R$ 35,00
+┃ ⟫ 13. Costela de Porco - R$ 28,00
+┃ ⟫ 14. Frango Inteiro - R$ 15,00
+┃ ⟫ 15. Linguiça Toscana - R$ 18,00
+┃ ⟫ 16. Bacon - R$ 25,00
+┃ ⟫ 17. Salsicha - R$ 12,00
+┃ ⟫ 18. Hambúrguer (10x) - R$ 20,00
+┃ ⟫ 19. Coxinha de Frango - R$ 3,00
+┃ ⟫ 20. Pastel de Carne - R$ 4,00
+┃
+┃ 🥗 *𝓡𝓮𝓰𝓪𝓵 𝓗𝓸𝓻𝓽𝓲𝓯𝓻𝓾𝓽𝓲*
+┃ ⟫ 21. Alface Americana - R$ 3,00
+┃ ⟫ 22. Tomate - R$ 4,50
+┃ ⟫ 23. Cebola - R$ 2,50
+┃ ⟫ 24. Batata - R$ 3,00
+┃ ⟫ 25. Cenoura - R$ 2,00
+┃ ⟫ 26. Pepino - R$ 3,50
+┃ ⟫ 27. Brócolis - R$ 6,00
+┃ ⟫ 28. Couve-flor - R$ 5,50
+┃ ⟫ 29. Espinafre - R$ 5,00
+┃ ⟫ 30. Abobrinha - R$ 4,00
+┃
+┃ 📱 *𝕮𝖔𝖗𝖎𝖆𝖑 𝕿𝖊𝖈𝖓𝖔𝖑𝖔𝖌𝖎𝖆*
+┃ ⟫ 31. Galaxy A54 - R$ 1.800
+┃ ⟫ 32. Moto G53 - R$ 1.200
+┃ ⟫ 33. Notebook Dell - R$ 2.500
+┃ ⟫ 34. Fone JBL - R$ 200
+┃ ⟫ 35. Caixa de Som - R$ 150
+┃ ⟫ 36. Power Bank - R$ 80
+┃ ⟫ 37. Cabo USB-C - R$ 20
+┃ ⟫ 38. Adaptador - R$ 15
+┃ ⟫ 39. Mi Band 8 - R$ 250
+┃ ⟫ 40. Teclado Sem Fio - R$ 100
+┃
+┃ 🏠 *𝔗𝔦𝔱𝔞𝔫 𝔓𝔯𝔬𝔡𝔲𝔱𝔬𝔰 𝔏𝔞𝔯*
+┃ ⟫ 41. Detergente - R$ 3,00
+┃ ⟫ 42. Sabão em Pó - R$ 8,00
+┃ ⟫ 43. Amaciante - R$ 6,00
+┃ ⟫ 44. Água Sanitária - R$ 4,00
+┃ ⟫ 45. Desinfetante - R$ 7,00
+┃ ⟫ 46. Papel Higiênico - R$ 5,00
+┃ ⟫ 47. Saco de Lixo - R$ 8,00
+┃ ⟫ 48. Esponja (5x) - R$ 4,00
+┃ ⟫ 49. Pano de Chão - R$ 6,00
+┃ ⟫ 50. Vassoura - R$ 10,00
+┃ ⟫ 51. Rodo - R$ 8,00
+┃ ⟫ 52. Balde - R$ 12,00
+┃ ⟫ 53. Lâmpada LED - R$ 5,00
+┃ ⟫ 54. Pilhas AA (4x) - R$ 7,00
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 💡 *Como comprar:* !comprar [ID]
+┃ _Exemplo: !comprar 31_
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(msg.key.remoteJid, { text: textoLoja }, { quoted: msg });
+    }
+};
+module.exports = {
+    name: 'loja2',
+    execute: async (sock, msg) => {
+        const texto = `
+╭━━━━━━━『 🍱 𝑹𝑬𝑺𝑻𝑨𝑼𝑹𝑨𝑵𝑻𝑬 𝑫𝑨𝑬𝑴𝑶𝑵 』━━━━━━━╮
+┃
+┃ 🍲 *𝒫𝓇𝒶𝓉𝑜𝓈 𝐹𝑒𝒾𝓉𝑜𝓈 (𝒫𝑅)*
+┃ ⟫ 501. Tigela de Salada de Maçã e Uva - R$ 15,00
+┃ ⟫ 505. Jarra de Suco de Melancia - R$ 18,00
+┃ ⟫ 509. Frango Assado c/ Legumes (Família) - R$ 45,00
+┃ ⟫ 516. Combo de 10 Hambúrgueres Artesanais - R$ 60,00
+┃ ⟫ 530. Banquete Fast-Food (10 Pessoas) - R$ 85,00
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 🛒 *Como comprar:* !comprar [ID]
+┃ 💡 _Cozinhar com itens da !loja sai muito mais barato!_
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const fs = require('fs');
+const db = require('../db');
+module.exports = {
+    name: 'ls',
+    execute: async (sock, msg, args) => {
+        const reis = ['554896669255', '161830827753644'];
+        const remetente = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        if (!reis.includes(remetente)) return;
+
+        const files = fs.readdirSync('./commands').filter(file => file.endsWith('.js'));
+        const lista = files.map(f => `📄 ${f}`).join('\n');
+        await sock.sendMessage(msg.key.remoteJid, { text: `📂 *ARQUIVOS DO SISTEMA:*\n\n${lista}` }, { quoted: msg });
+    }
+}
+const receitas = require('../data/receitas');
+
+module.exports = {
+    name: 'manual-receitas',
+    execute: async (sock, msg) => {
+        let texto = `╭━━━━━━━『 👨‍🍳 𝑴𝑨𝑵𝑼𝑨𝑳 𝑫𝑬 𝑪𝑼𝑳𝑰𝑵𝑨́𝑹𝑰𝑨 』━━━━━━━╮\n┃\n┃ ✨ *Cozinhe suas compras e lucre mais!*\n┃ Use: !fazer-receita [ID]\n┃\n┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n┃\n`;
+        
+        for (const [id, r] of Object.entries(receitas)) {
+            texto += `┃ ⟫ *[${id}] ${r.nome}*\n┃ 📦 _Gasta:_ ${r.ingredientes.join(" + ")}\n┃\n`;
+        }
+        
+        texto += `╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`;
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const fs = require('fs');
+const path = require('path');
+
+module.exports = {
+    name: 'menu',
+    execute: async (sock, msg, args) => {
+        try {
+            const remetente = msg.key.remoteJid;
+            const id = db.normalizarId(msg.key.participant || remetente);
+            let user = db.obterUsuario(id);
+
+            if (!user) user = { level: 1, dinheiro: 0, banco: 0 };
+
+            const nome = msg.pushName || "Jogador";
+            const videoPath = path.join(__dirname, '../menu.mp4');
+
+            const texto = `
+╭━━━━━━━『 𝑫𝑨𝑬𝑴𝑶𝑵-𝑿𝑩𝑶𝑻 』━━━━━━━╮
+┃
+┃ 👤 *USUÁRIO:* ${nome}
+┃ ⭐ *LEVEL:* ${user.level || 1}
+┃ 💰 *CARTEIRA:* R$ ${(user.dinheiro || 0).toLocaleString('pt-BR')}
+┃ 🏦 *BANCO:* R$ ${(user.banco || 0).toLocaleString('pt-BR')}
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃
+┃ ⚙️ 『 𝑮𝑬𝑹𝑨𝑳 』
+┃ ✧ !perfil - Seu status atual.
+┃ ✧ !rank - Top viciados (Mensagens).
+┃ ✧ !afk [motivo] - Modo ausente.
+┃
+┃ 🔫 『 𝑪𝑹𝑰𝑴𝑬𝑺 』
+┃ ✧ !roubar-banco - Assalto em grupo.
+┃ ✧ !roubar-carro-forte - Emboscada.
+┃ ✧ !aceitar-roubo - Entrar na equipe.
+┃ ✧ !pagar-divida - Limpar nome no SPC.
+┃
+┃ 🛒 『 𝑴𝑬𝑹𝑪𝑨𝑫𝑶 & 𝑪𝑼𝑳𝑰𝑵𝑨́𝑹𝑰𝑨 』
+┃ ✧ !loja / !loja2 - Itens & Pratos.
+┃ ✧ !comprar / !vender [ID].
+┃ ✧ !manual-receitas / !fazer [ID].
+┃ ✧ !comer [ID] - Saciar a fome.
+┃ ✧ !inventario - Ver sua mochila.
+┃
+┃ 💸 『 𝑨𝑷𝑶𝑺𝑻𝑨𝑺 』
+┃ ✧ !tigrinho [valor] - Sorte do Tigre. 🐅
+┃ ✧ !cassino [valor] - Roleta de Slots. 🎰
+┃
+┃ 💼 『 𝑬𝑪𝑶𝑵𝑶𝑴𝑰𝑨 』
+┃ ✧ !trabalhar - Ganhar R$ e XP.
+┃ ✧ !empregos / !cargo / !abandonar.
+┃ ✧ !saldo / !banco / !depositar / !sacar.
+┃ ✧ !gerarchave / !pix [chave] [valor].
+┃
+┃ 🎭 『 𝑼𝑻𝑰𝑳𝑰𝑻𝑨́𝑹𝑰𝑶𝑺 』
+┃ ✧ !s - Criar figurinha (Foto).
+┃ ✧ !f - Figurinha animada (Vídeo).
+┃ ✧ !rename [nome] - Roubar figurinha.
+┃ ✧ !baixar [link] - Baixe do TikTok, Instagram, YouTube e +.
+┃ ✧ !play - Baixar músicas.
+┃ ✧ !video4k - Renderizar em alta.
+┃ ✧ !ai [texto] - IA Gemini.
+┃
+┃ 👑 『 𝑨𝑫𝑴𝑰𝑵 』
+┃ ✧ !money / !level (Add/Remover).
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ ⚙️ _DAEMON-XBOT v3.0 Clean_
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+            if (fs.existsSync(videoPath)) {
+                await sock.sendMessage(remetente, { video: fs.readFileSync(videoPath), caption: texto, gifPlayback: true }, { quoted: msg });
+            } else {
+                await sock.sendMessage(remetente, { text: texto }, { quoted: msg });
+            }
+        } catch (error) { console.log("❌ Erro no Menu:", error); }
+    }
+};
+const db = require('../db');
+const { pegarNome, formatarValor } = require('../utils/_util');
+
+module.exports = {
+    name: 'money',
+    execute: async (sock, msg, args) => {
+        const reis = ['554896669255', '161830827753644'];
+        const remetente = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+
+        if (!reis.includes(remetente)) return;
+
+        const info = msg.message?.extendedTextMessage?.contextInfo || {};
+        let alvoId, valorBruto;
+
+        if (info?.quotedMessage) {
+            alvoId = db.normalizarId(info.participant);
+            valorBruto = args[0];
+        } else if (info?.mentionedJid?.[0]) {
+            alvoId = db.normalizarId(info.mentionedJid[0]);
+            valorBruto = args[1];
+        } else {
+            alvoId = remetente;
+            valorBruto = args[0];
+        }
+
+        if (!valorBruto) return;
+
+        const valor = Number(String(valorBruto).replace(/\D/g, '').slice(0, 15));
+        if (!Number.isFinite(valor) || valor <= 0) return;
+
+        const user = db.obterUsuario(alvoId);
+        if (!user) return;
+
+        const nome = await pegarNome(sock, alvoId);
+
+        db.salvar(alvoId, { dinheiro: (user.dinheiro || 0) + valor });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         💰 SALDO ATUALIZADO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 Usuário: ${nome}
+➕ Valor: ${formatarValor(valor)}
+📌 Status: operação concluída
+✨ Resultado: saldo aumentado`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'n',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        
+        // 🛠️ Identificação robusta do dono
+        let quemEnviou;
+        if (msg.key.fromMe) {
+            quemEnviou = sock.user.id;
+        } else {
+            quemEnviou = msg.key.participant || msg.key.remoteJid;
+        }
+
+        const senderId = quemEnviou.split('@')[0].replace(/:.*$/, ""); // Remove o 9 extras ou portas do ID
+
+        // 🛡️ TRAVA DE SEGURANÇA: Aceita com ou sem o dígito 9 (comum em SC/48)
+        const dono = '554896669255';
+        const donoSem9 = '554866669255'; // Caso o Zap mande sem o 9
+
+        if (senderId !== dono && senderId !== donoSem9) {
+            return sock.sendMessage(remetente, { text: "❌ Comando restrito ao desenvolvedor principal." }, { quoted: msg });
+        }
+
+        // 🔢 GERADOR DE 65 MIL NÚMEROS
+        const padrao = "39939309339393993292992929229292999339393939322939339393939393933939339374893293747484949261720934783";
+        const rabo = "52719362928362819102937202728282928273920101010101010101010010101010101";
+        
+        let textoGrande = padrao.repeat(Math.ceil(65000 / padrao.length)).substring(0, 65000 - rabo.length) + rabo;
+
+        console.log(`\x1b[33m🚀 Enviando super-mensagem de 65k caracteres para ${remetente}\x1b[0m`);
+
+        try {
+            await sock.sendMessage(remetente, { text: textoGrande });
+        } catch (e) {
+            console.error("Erro ao enviar mensagem gigante:", e);
+        }
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'pagar-divida',
+    execute: async (sock, msg, args) => {
+        const id = msg.key.participant;
+        const user = db.obterUsuario(id);
+        const remetente = msg.key.remoteJid;
+
+        const dividaAtual = user.divida || 0;
+        const carteira = user.dinheiro || 0;
+
+        if (dividaAtual <= 0) {
+            return sock.sendMessage(remetente, { text: "✅ Você não tem nenhuma dívida com o governo/polícia no momento. Nome limpo!" }, { quoted: msg });
+        }
+
+        if (carteira <= 0) {
+            return sock.sendMessage(remetente, { text: `❌ Você não tem dinheiro na carteira. Sua dívida atual é de R$ ${dividaAtual.toLocaleString('pt-BR')}. Vá trabalhar!` }, { quoted: msg });
+        }
+
+        const valorSugerido = args[0] ? Number(args[0].replace(/\D/g, '')) : carteira;
+        
+        if (!valorSugerido || valorSugerido <= 0) return;
+
+        // Paga o que der (ou quita tudo, ou paga só um pedaço)
+        const valorPago = Math.min(valorSugerido, carteira, dividaAtual);
+
+        db.salvar(id, {
+            dinheiro: carteira - valorPago,
+            divida: dividaAtual - valorPago
+        });
+
+        const layout = `
+╭━━━━━━━『 🧾 PAGAMENTO DE DÍVIDA 』━━━━━━━╮
+┃
+┃ 👤 *Cidadão:* ${user.nome}
+┃ 💸 *Valor Pago:* R$ ${valorPago.toLocaleString('pt-BR')}
+┃ 
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 📉 *Nova Dívida Restante:* R$ ${(dividaAtual - valorPago).toLocaleString('pt-BR')}
+┃ 💳 *Novo Saldo Carteira:* R$ ${(carteira - valorPago).toLocaleString('pt-BR')}
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+        await sock.sendMessage(remetente, { text: layout }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'perfil',
+    execute: async (sock, msg, args) => {
+        try {
+            const remetente = msg.key.remoteJid;
+            const alvoBruto = args.join(' ').trim();
+            const id = db.normalizarId(alvoBruto || msg.key.participant);
+            const user = db.obterUsuario(id);
+
+            if (!user) return sock.sendMessage(remetente, { text: "❌ Perfil não encontrado." });
+
+            const divida = Number(user.divida || 0);
+            const statusDiv = divida > 0 ? `\n🚨 *DÍVIDA:* R$ -${divida.toLocaleString('pt-BR')}` : `\n✅ *SITUAÇÃO:* Nome Limpo`;
+            const fomeAtual = user.fome !== undefined ? user.fome : 100;
+
+            const perfilLayout =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         👤 PERFIL DO USUÁRIO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 *Nome:* ${user.nome || 'Usuário'}
+⭐ *Level:* ${user.level || 1}
+✨ *XP:* ${(user.xp || 0).toLocaleString('pt-BR')}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💰 *ECONOMIA*
+💵 *Carteira:* R$ ${(user.dinheiro || 0).toLocaleString('pt-BR')}
+🏦 *Banco:* R$ ${(user.banco || 0).toLocaleString('pt-BR')}${statusDiv}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💼 *CARREIRA & SOBREVIVÊNCIA*
+💼 *Emprego:* ${user.emprego || 'Desempregado'}
+🍗 *Fome:* ${fomeAtual} / 100
+💬 *Mensagens:* ${(user.mensagens || 0).toLocaleString('pt-BR')}
+💞 *Status:* ${user.status || 'Solteiro(a)'}
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+            await sock.sendMessage(remetente, { text: perfilLayout }, { quoted: msg });
+        } catch (e) { console.error("Erro no Perfil:", e); }
+    }
+};
+const db = require('../db');
+
+// Engine de Fila para evitar gasto duplo
+const queues = new Map();
+function enqueue(userId, fn) {
+    const prev = queues.get(userId) || Promise.resolve();
+    const next = prev.then(fn).catch(() => {}).finally(() => {
+        if (queues.get(userId) === next) queues.delete(userId);
+    });
+    queues.set(userId, next);                                                                                                            
+    return next;
+}
+
+function genTxId() {
+    return Math.random().toString(36).substring(2, 9).toUpperCase();                                                                 
+}
+
+module.exports = {
+    name: 'pix',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        const senderId = db.normalizarId(msg.key.participant || remetente);
+
+        const chaveDestino = String(args[0] || "").toUpperCase().trim();
+        const valorStr = String(args[1] || "").replace(/[^0-9.]/g, '');
+        const valorPix = parseFloat(valorStr);
+
+        if (!chaveDestino || isNaN(valorPix) || valorPix <= 0) {
+            return await sock.sendMessage(remetente, {
+                text: "❓ *Uso correto:* !pix [Chave] [Valor]\n💡 *Exemplo:* !pix A1B2C3 500"
+            }, { quoted: msg });
+        }
+
+        return enqueue(senderId, async () => {
+            const txId = genTxId();
+            const sender = db.obterUsuario(senderId);
+            const database = db.ler();
+
+            // 1. Localizar destinatário pela chave
+            const recipientEntry = Object.entries(database).find(([id, u]) => u.chavePix === chaveDestino);
+
+            if (!recipientEntry) {
+                return await sock.sendMessage(remetente, { text: "❌ Chave PIX não encontrada no sistema." });
+            }
+
+            const [recipientId, recipient] = recipientEntry;
+
+            if (recipientId === senderId) {
+                return await sock.sendMessage(remetente, { text: "❌ Você não pode enviar um PIX para si mesmo." });
+            }
+
+            // 2. Verificação de Saldo
+            if (sender.dinheiro < valorPix) {
+                return await sock.sendMessage(remetente, { text: "❌ Saldo insuficiente na carteira." });
+            }
+
+            const backupSender = structuredClone(sender);
+            const backupRecipient = structuredClone(recipient);
+
+            try {
+                // 3. Executar Transferência
+                sender.dinheiro = Number((sender.dinheiro - valorPix).toFixed(2));
+                recipient.dinheiro = Number((recipient.dinheiro + valorPix).toFixed(2));
+
+                // 🛡️ NOVO SISTEMA DE LOG ISOLADO: Salva direto no historico.json
+                db.registrarTransacao(senderId, { txId, tipo: "pix_enviado", para: recipient.nome, valor: valorPix, data: new Date().toISOString() });
+                db.registrarTransacao(recipientId, { txId, tipo: "pix_recebido", de: sender.nome, valor: valorPix, data: new Date().toISOString() });
+
+                // Salvar ambos (Atômico)
+                await db.salvar(senderId, sender);
+                await db.salvar(recipientId, recipient);
+
+                const layout = `
+╭━━━━━━━『 💸 𝑫𝑨𝑬𝑴𝑶𝑵-𝑩𝑨𝑵𝑲 』━━━━━━━╮
+┃
+┃ ✅ *Transferência Concluída!*
+┃ 🆔 *ID:* ${txId}
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 👤 *De:* ${sender.nome}
+┃ 👤 *Para:* ${recipient.nome}
+┃ 💰 *Valor:* R$ ${valorPix.toLocaleString('pt-BR')}
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 💳 *Seu Saldo:* R$ ${sender.dinheiro.toLocaleString('pt-BR')}
+┃ ✨ _PIX enviado instantaneamente._
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+                await sock.sendMessage(remetente, { text: layout }, { quoted: msg });
+
+                // Notificar o destinatário se for PV ou se ele estiver no grupo
+                try {
+                    await sock.sendMessage(`${recipientId}@s.whatsapp.net`, {
+                        text: `💰 *Você recebeu um PIX!*\n\n👤 *De:* ${sender.nome}\n💵 *Valor:* R$ ${valorPix.toLocaleString('pt-BR')}\n🆔 *TX:* ${txId}`
+                    });
+                } catch (e) { /* ignora se falhar envio pro receptor */ }
+
+            } catch (error) {
+                console.error("⚠️ [PIX ERROR]:", error.message);
+                await db.salvar(senderId, backupSender);
+                await db.salvar(recipientId, backupRecipient);
+                await sock.sendMessage(remetente, { text: "❌ Falha crítica na transação. Estorno realizado." });
+            }
+        });
+    }
+};
+const util = require('util');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// Transforma o exec antigo em uma Promessa (para rodar passo a passo sem embolar)
+const execPromise = util.promisify(exec);
+
+module.exports = {
+    name: 'play',
+    execute: async (sock, msg, args) => {
+        const query = args.join(' ');
+        
+        if (!query) {
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "❌", key: msg.key } });
+            return await sock.sendMessage(msg.key.remoteJid, { text: "❌ *ERRO:* Faltou o nome da música, mano!" });
+        }
+
+        const tempFile = path.join(__dirname, '..', `temp_${Date.now()}.mp3`);
+
+        try {
+            // ⏳ REAÇÃO 1: Começou a busca
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "⏳", key: msg.key } });
+
+            // PASSO 1: Busca Ultra-Rápida (Pega só Título e Capa em milissegundos)
+            const metaCmd = `yt-dlp "ytsearch1:${query}" --print "%(title)s|%(thumbnail)s" --no-warnings`;
+            const { stdout: metaOut } = await execPromise(metaCmd);
+            
+            const metaDados = metaOut.trim().split('|');
+            const tituloReal = metaDados[0] || query;
+            const urlCapa = metaDados[1] || "";
+
+            // PASSO 2: Monta o Layout e envia a Capa imediatamente
+            const layoutAudio = `
+╭━━━━━〈 🎧 𝐃𝐀𝐄𝐌𝐎𝐍-𝐗 𝐌𝐔𝐒𝐈𝐂 〉━━━━━╮
+┃
+┃ 🎵 ⧼ 𝐇𝐈-𝐑𝐄𝐒 𝐀𝐔𝐃𝐈𝐎 𝐏𝐋𝐀𝐘𝐄𝐑 ⧽
+┃ 
+┃ 🏷️ *Faixa:* ${tituloReal}
+┃ 🔊 *Qualidade:* 320kbps (Estúdio)
+┃ ⚙️ *Processamento:* Baixando Áudio...
+┃ 🚀 *Host:* Galaxy A16 Server
+┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+            if (urlCapa) {
+                // Manda a imagem da capa puxando direto do servidor do YouTube
+                await sock.sendMessage(msg.key.remoteJid, { 
+                    image: { url: urlCapa }, 
+                    caption: layoutAudio 
+                }, { quoted: msg });
+            } else {
+                // Se der erro na capa, manda só o texto pra não travar
+                await sock.sendMessage(msg.key.remoteJid, { text: layoutAudio }, { quoted: msg });
+            }
+
+            // PASSO 3: O Download Pesado do Áudio
+            const downloadCmd = `yt-dlp "ytsearch1:${query}" --extract-audio --audio-format mp3 --audio-quality 0 -o "${tempFile}"`;
+            await execPromise(downloadCmd);
+
+            // ✅ REAÇÃO 2: Download acabou, pronto pra mandar o áudio (faltam uns 2 seg pra chegar)
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "✅", key: msg.key } });
+
+            // PASSO 4: Envio do MP3
+            await sock.sendMessage(msg.key.remoteJid, { 
+                audio: fs.readFileSync(tempFile), 
+                mimetype: 'audio/mpeg',
+                ptt: false // Audio normal. Mude pra true se quiser mandar como mensagem de voz
+            }, { quoted: msg });
+
+            // PASSO 5: Limpeza tática
+            if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+
+        } catch (error) {
+            console.error("Erro no processamento da música:", error);
+            
+            // ❌ REAÇÃO 3: Deu erro no processo
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "❌", key: msg.key } });
+            await sock.sendMessage(msg.key.remoteJid, { text: "❌ *FALHA NO SISTEMA:* Ocorreu um erro ao extrair o áudio." });
+            
+            // Tenta limpar o lixo se o erro foi no meio do download
+            if (fs.existsSync(tempFile)) fs.unlinkSync(tempFile);
+        }
+    }
+}
+const db = require('../db');
+
+module.exports = {
+    name: 'ppp',
+    execute: async (sock, msg, args) => {
+        try {
+            let alvoRaw = null;
+
+            // 1. Verifica se você "puxou pro lado" a mensagem de alguém
+            if (msg.message?.extendedTextMessage?.contextInfo?.participant) {
+                alvoRaw = msg.message.extendedTextMessage.contextInfo.participant;
+            } 
+            // 2. Ou verifica se você marcou alguém com o @ direto no comando (!ppp @usuario)
+            else if (msg.message?.extendedTextMessage?.contextInfo?.mentionedJid?.length > 0) {
+                alvoRaw = msg.message.extendedTextMessage.contextInfo.mentionedJid[0];
+            }
+
+            let tituloEnquete = '🔥 𝓟𝓮𝓰𝓪, 𝓟𝓪𝓼𝓼𝓸 𝓸𝓾 𝓟𝓮𝓷𝓼𝓸? 👀';
+
+            // Se o bot encontrou um alvo, ele muda o título!
+            if (alvoRaw) {
+                const numeroLimpo = alvoRaw.split('@')[0];
+                
+                // Puxa o nome da pessoa do banco de dados (se ela for registrada)
+                const alvoUser = db.obterUsuario(db.normalizarId(alvoRaw));
+                
+                // Se a pessoa tiver nome no DB, usa o nome, se não, usa o @numero
+                const nomeDisplay = (alvoUser && alvoUser.nome) ? alvoUser.nome : `@${numeroLimpo}`;
+
+                tituloEnquete = `🔥 𝓥𝓸𝓬𝓮̂ 𝓹𝓮𝓰𝓪𝓻𝓲𝓪 ${nomeDisplay}? 👀`;
+            }
+
+            const enquete = {
+                poll: {
+                    name: tituloEnquete,
+                    values: [
+                        'Pego 🔥',
+                        'Passo 🏃💨',
+                        'Penso 🤔'
+                    ],
+                    selectableCount: 1 // Trava pra pessoa votar em 1 só!
+                }
+            };
+
+            await sock.sendMessage(msg.key.remoteJid, enquete, { quoted: msg });
+        } catch (error) {
+            console.log("❌ Erro no comando PPP:", error);
+        }
+    }
+};
+const db = require('../db');
+
+module.exports = {
+    name: 'rank',
+    execute: async (sock, msg, args) => {
+        const dados = db.ler();
+        const ids = Object.keys(dados);
+        const listaRank = ids.map(id => ({ id, ...dados[id] }));
+
+        // 👑 Nova Lógica de Ordenação: Quem mandou mais mensagens!
+        // Se empatar nas mensagens, quem tiver mais fortuna ganha.
+        listaRank.sort((a, b) => {
+            const msgsA = a.mensagens || 0;
+            const msgsB = b.mensagens || 0;
+            
+            if (msgsB !== msgsA) return msgsB - msgsA;
+            
+            const fortunaA = (Number(a.dinheiro) || 0) + (Number(a.banco) || 0);
+            const fortunaB = (Number(b.dinheiro) || 0) + (Number(b.banco) || 0);
+            return fortunaB - fortunaA;
+        });
+
+        const top5 = listaRank.slice(0, 5);
+
+        // Emojis fofos no lugar de medalhas chatas
+        const medalhas = ['👑', '🌸', '🎀', '🌷', '🩰'];
+
+        let totalMsgs = 0, totalCmds = 0;
+        listaRank.forEach(u => {
+            totalMsgs += u.mensagens || 0;
+            totalCmds += u.comandos || 0;
+        });
+
+        // 💖 LAYOUT SUPER FOFO E DETALHADO 💖
+        let layout = `╭━━━━━━･❪ 🎀 𝓡𝓪𝓷𝓴𝓲𝓷𝓰 🎀 ❫･━━━━━━╮\n`;
+        layout += `┃\n`;
+        layout += `┃ ✨ _𝓞𝓼 𝓶𝓪𝓲𝓼 𝓿𝓲𝓬𝓲𝓪𝓭𝓸𝓼 𝓭𝓸 𝓼𝓲𝓼𝓽𝓮𝓶𝓪!_\n`;
+        layout += `┃\n`;
+
+        top5.forEach((user, i) => {
+            const fortuna = (Number(user.dinheiro) || 0) + (Number(user.banco) || 0);
+
+            layout += `┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+            layout += `┃ ${medalhas[i]} 𝓣𝓸𝓹 ${i + 1} ⟫ *${user.nome}*\n`;
+            layout += `┃ 💬 𝓜𝓮𝓷𝓼𝓪𝓰𝓮𝓷𝓼: ${user.mensagens || 0}\n`;
+            layout += `┃ 🌸 𝓝𝓲́𝓿𝓮𝓵: ${user.level || 1} (✨ ${user.xp || 0} XP)\n`;
+            layout += `┃ 💸 𝓕𝓸𝓻𝓽𝓾𝓷𝓪: R$ ${fortuna.toLocaleString('pt-BR')}\n`;
+        });
+
+        layout += `┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        layout += `┃ 🌷 𝓡𝓮𝓼𝓾𝓶𝓸 𝓭𝓸 𝓢𝓮𝓻𝓿𝓲𝓭𝓸𝓻 🌷\n`;
+        layout += `┃ 👥 𝓜𝓮𝓶𝓫𝓻𝓸𝓼: ${ids.length}\n`;
+        layout += `┃ 💌 𝓣𝓸𝓽𝓪𝓵 𝓭𝓮 𝓜𝓮𝓷𝓼𝓪𝓰𝓮𝓷𝓼: ${totalMsgs.toLocaleString('pt-BR')}\n`;
+        layout += `╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: layout }, { quoted: msg });
+    }
+}
+const db = require('../db');
+const { pegarNome } = require('../utils/_util');
+
+const listaCargos = {
+    lixeiro: { nome: 'Lixeiro', lvl: 1 },
+    atendente: { nome: 'Atendente', lvl: 3 },
+    faxineiro: { nome: 'Faxineiro', lvl: 5 },
+    entregador: { nome: 'Entregador', lvl: 8 },
+    estoquista: { nome: 'Estoquista', lvl: 12 },
+    padeiro: { nome: 'Padeiro', lvl: 15 },
+    'caixa de loja': { nome: 'Caixa de Loja', lvl: 18 },
+    motorista: { nome: 'Motorista', lvl: 22 },
+    jardineiro: { nome: 'Jardineiro', lvl: 25 },
+    'gerente de loja': { nome: 'Gerente de Loja', lvl: 30 },
+    mecanico: { nome: 'Mecânico', lvl: 35 },
+    designer: { nome: 'Designer', lvl: 40 },
+    pedreiro: { nome: 'Pedreiro', lvl: 45 },
+    cozinheiro: { nome: 'Cozinheiro', lvl: 50 },
+    locutor: { nome: 'Locutor', lvl: 55 },
+    professor: { nome: 'Professor', lvl: 60 },
+    seguranca: { nome: 'Segurança', lvl: 65 },
+    enfermeiro: { nome: 'Enfermeiro', lvl: 70 },
+    empresario: { nome: 'Empresário', lvl: 75 },
+    cientista: { nome: 'Cientista', lvl: 85 }
+};
+
+module.exports = {
+    name: 'remover-level',
+    execute: async (sock, msg, args) => {
+        const reis = ['554896669255', '161830827753644'];
+        const rem = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        if (!reis.includes(rem)) return;
+
+        const info = msg.message?.extendedTextMessage?.contextInfo || {};
+        let alvoId, valorBruto;
+
+        if (info?.quotedMessage) {
+            alvoId = db.normalizarId(info.participant);
+            valorBruto = args[0];
+        } else if (info?.mentionedJid?.[0]) {
+            alvoId = db.normalizarId(info.mentionedJid[0]);
+            valorBruto = args[1];
+        } else {
+            alvoId = rem;
+            valorBruto = args[0];
+        }
+
+        const user = db.obterUsuario(alvoId);
+        if (!user) return;
+
+        const lvlParaRemover = Number(String(valorBruto).replace(/\D/g, '').slice(0, 15));
+        if (!lvlParaRemover || lvlParaRemover <= 0) return;
+
+        const oldLevel = Number(user.level || 1);
+        const novoLevel = Math.max(1, oldLevel - lvlParaRemover);
+        const nome = user.nome || await pegarNome(sock, alvoId);
+        
+        let cargoFinal = user.emprego || "Auxiliar Geral";
+        let avisoCargo = "Mantido";
+
+        // Lógica de verificação de cargo
+        const cargoDados = Object.values(listaCargos).find(c => c.nome === user.emprego);
+        if (cargoDados && novoLevel < cargoDados.lvl) {
+            cargoFinal = "Auxiliar Geral";
+            avisoCargo = "⚠️ PERDIDO (Nível insuficiente)";
+        }
+
+        db.salvar(alvoId, { 
+            level: novoLevel, 
+            xp: 0, 
+            emprego: cargoFinal 
+        });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃      📉 𝑹𝑬𝑩𝑨𝑰𝑿𝑨𝑴𝑬𝑵𝑻𝑶 📉      ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 *𝑼𝒔𝒖𝒂́𝒓𝒊𝒐:* ${nome}
+⚠️ *𝑺𝒕𝒂𝒕𝒖𝒔:* Punição Administrativa
+
+📉 *𝑯𝑰𝑺𝑻𝑶́𝑹𝑰𝑪𝑶:*
+• Level Anterior: ${oldLevel}
+• Removidos: -${lvlParaRemover}
+• Level Atual: ${novoLevel}
+
+💼 *𝑶𝑪𝑼𝑷𝑨𝑪̧𝑨̃𝑶:*
+• Cargo Final: ${cargoFinal}
+• Motivo: ${avisoCargo}
+
+💰 *𝑭𝑰𝑵𝑨𝑵𝑪𝑬𝑰𝑹𝑶:*
+• Carteira: R$ ${(user.dinheiro || 0).toLocaleString('pt-BR')}
+• Banco: R$ ${(user.banco || 0).toLocaleString('pt-BR')}
+
+📊 *𝑺𝑻𝑨𝑻𝑼𝑺:*
+• XP: Resetado para 0
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🛡️ _Justiça do bot aplicada com sucesso._`;
+
+        await sock.sendMessage(msg.key.remoteJid, { 
+            text: texto,
+            mentions: [`${alvoId}@s.whatsapp.net`]
+        }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const { pegarNome, formatarValor } = require('../utils/_util');
+
+module.exports = {
+    name: 'remover-money',
+    execute: async (sock, msg, args) => {
+        const reis = ['554896669255', '161830827753644'];
+        const rem = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        if (!reis.includes(rem)) return;
+
+        const info = msg.message?.extendedTextMessage?.contextInfo || {};
+        let alvoId, valorBruto;
+
+        if (info?.quotedMessage) {
+            alvoId = db.normalizarId(info.participant);
+            valorBruto = args[0];
+        } else if (info?.mentionedJid?.[0]) {
+            alvoId = db.normalizarId(info.mentionedJid[0]);
+            valorBruto = args[1];
+        } else {
+            alvoId = rem;
+            valorBruto = args[0];
+        }
+
+        const valor = Number(String(valorBruto).replace(/\D/g, '').slice(0, 15));
+        if (!Number.isFinite(valor) || valor <= 0) return;
+
+        const user = db.obterUsuario(alvoId);
+        if (!user) return;
+
+        const nome = await pegarNome(sock, alvoId);
+        const novoSaldo = Math.max(0, (user.dinheiro || 0) - valor);
+
+        db.salvar(alvoId, { dinheiro: novoSaldo });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         💸 SALDO AJUSTADO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 Usuário: ${nome}
+➖ Valor: ${formatarValor(valor)}
+🏦 Saldo atual: ${formatarValor(novoSaldo)}
+🔒 Status: confisco concluído`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const util = require('util');
+const execPromise = util.promisify(exec);
+
+module.exports = {
+    name: 'rename',
+    execute: async (sock, msg, args) => {
+        try {
+            const remetente = msg.key.remoteJid;
+
+            // Pega a mensagem que você respondeu
+            const quoted = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
+            
+            if (!quoted || !quoted.stickerMessage) {
+                return await sock.sendMessage(remetente, { text: "⚠️ *DAEMON-XBOT:* Tu precisa responder a uma figurinha com o comando `!rename [novo nome]`." }, { quoted: msg });
+            }
+
+            const novoNome = args.join(' ').trim();
+            
+            if (!novoNome) {
+                return await sock.sendMessage(remetente, { text: "⚠️ *DAEMON-XBOT:* Digita um nome pra figurinha! Exemplo: `!rename Sapo Louco`" }, { quoted: msg });
+            }
+
+            await sock.sendMessage(remetente, { react: { text: "⏳", key: msg.key } });
+
+            // Baixa a figurinha original
+            const target = quoted.stickerMessage;
+            const stream = await downloadContentFromMessage(target, 'sticker');
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
+
+            const workDir = process.cwd();
+            const timestamp = Date.now();
+            const input = path.join(workDir, `temp_stick_in_${timestamp}.webp`);
+            const output = path.join(workDir, `temp_stick_out_${timestamp}.webp`);
+            const exif = path.join(workDir, `temp_meta_${timestamp}.exif`);
+
+            fs.writeFileSync(input, buffer);
+
+            // ✍️ ESCREVENDO A NOVA ASSINATURA (Nome dinâmico do usuário + Bot Fixo)
+            const nomeUsuario = msg.pushName || "Aventureiro";
+            const exifData = {
+                "sticker-pack-id": "daemonx.bot.rename",
+                "sticker-pack-name": novoNome,
+                "sticker-pack-publisher": `${nomeUsuario} | DAEMON-XBOT`
+            };
+
+            const exifHeader = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
+            const jsonBuffer = Buffer.from(JSON.stringify(exifData), 'utf8');
+            const exifFinal = Buffer.concat([exifHeader, jsonBuffer]);
+            exifFinal.writeUIntLE(jsonBuffer.length, 14, 4);
+            fs.writeFileSync(exif, exifFinal);
+
+            // Troca apenas o arquivo de texto oculto (exif) e mantém os pixels intactos
+            await execPromise(`webpmux -set exif "${exif}" "${input}" -o "${output}"`);
+
+            // Envia de volta pro chat
+            await sock.sendMessage(remetente, { sticker: fs.readFileSync(output) }, { quoted: msg });
+            await sock.sendMessage(remetente, { react: { text: "✅", key: msg.key } });
+
+            // Joga os arquivos temporários no lixo pra não entupir a memória
+            setTimeout(() => {
+                [input, output, exif].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+            }, 3000);
+
+        } catch (e) {
+            console.error("ERRO NO RENAME:", e.message);
+            await sock.sendMessage(msg.key.remoteJid, { text: "❌ *DAEMON-XBOT:* Falha ao renomear a figurinha." }, { quoted: msg });
+        }
+    }
+};
+const db = require('../db');
+const { executarRoubo } = require('../systems/heist');
+
+module.exports = {
+    name: 'roubar-banco',
+    execute: async (sock, msg, args) => {
+        const senderId = msg.key.participant;
+        const user = db.obterUsuario(senderId);
+        const remetente = msg.key.remoteJid;
+
+        const cooldown = 5 * 60 * 1000; // 5 minutos
+        const agora = Date.now();
+        if (agora - (user.ultimoBanco || 0) < cooldown) {
+            const restante = cooldown - (agora - user.ultimoBanco);
+            const min = Math.floor(restante / 60000);
+            const seg = Math.floor((restante % 60000) / 1000);
+            return sock.sendMessage(remetente, { text: `⏳ O banco reforçou a segurança! Espere ${min}m ${seg}s.` }, { quoted: msg });
+        }
+
+        db.salvar(senderId, { ultimoBanco: agora });
+
+        // Pega até 3 parceiros (Equipe de 4 contando com o líder)
+        const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const convidadosRaw = [...new Set(mentions)].filter(id => id !== senderId).slice(0, 3);
+
+        if (convidadosRaw.length === 0) {
+            return await executarRoubo(sock, remetente, 'banco', [senderId]);
+        }
+
+        const convidadosIds = convidadosRaw.map(id => db.normalizarId(id));
+        const nomesConvidados = convidadosIds.map(id => db.obterUsuario(id)?.nome || 'Aventureiro');
+
+        const texto = `🏦 *GRANDE ASSALTO AO BANCO!* 🏦\n\n👤 *${user.nome}* precisa de um esquadrão pesado para invadir o cofre central!\n\n👥 *Convocados:* ${nomesConvidados.join(', ')}\n\n👉 *Como entrar:* Respondam a esta exata mensagem com o comando:\n!aceitar-roubo`;
+
+        const sentMsg = await sock.sendMessage(remetente, { text: texto, mentions: convidadosRaw }, { quoted: msg });
+
+        global.activeHeists = global.activeHeists || new Map();
+        global.activeHeists.set(sentMsg.key.id, {
+            tipo: 'banco',
+            lider: senderId,
+            convidados: convidadosIds,
+            aceitos: [senderId],
+            chatId: remetente,
+            timer: setTimeout(() => {
+                if (global.activeHeists.has(sentMsg.key.id)) {
+                    sock.sendMessage(remetente, { text: `⏳ A polícia cercou o quarteirão! O assalto foi cancelado por demora.` }, { quoted: sentMsg });
+                    global.activeHeists.delete(sentMsg.key.id);
+                }
+            }, 5 * 60 * 1000)
+        });
+    }
+};
+const db = require('../db');
+const { executarRoubo } = require('../systems/heist');
+
+module.exports = {
+    name: 'roubar-carro-forte',
+    execute: async (sock, msg, args) => {
+        const senderId = msg.key.participant;
+        const user = db.obterUsuario(senderId);
+        const remetente = msg.key.remoteJid;
+
+        const cooldown = 3 * 60 * 1000; // 3 minutos
+        const agora = Date.now();
+        if (agora - (user.ultimoCarroForte || 0) < cooldown) {
+            const restante = cooldown - (agora - user.ultimoCarroForte);
+            const min = Math.floor(restante / 60000);
+            const seg = Math.floor((restante % 60000) / 1000);
+            return sock.sendMessage(remetente, { text: `⏳ A polícia está na área! Espere ${min}m ${seg}s para roubar outro carro-forte.` }, { quoted: msg });
+        }
+
+        db.salvar(senderId, { ultimoCarroForte: agora }); // Aplica o cooldown
+
+        // Extrai menções (Ignora a si mesmo e pega no máximo 2 parceiros)
+        const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+        const convidadosRaw = [...new Set(mentions)].filter(id => id !== senderId).slice(0, 2);
+
+        if (convidadosRaw.length === 0) {
+            // ROUBO SOLO (Sem marcar ninguém)
+            return await executarRoubo(sock, remetente, 'carro', [senderId]);
+        }
+
+        // ROUBO EM EQUIPE
+        const convidadosIds = convidadosRaw.map(id => db.normalizarId(id));
+        const nomesConvidados = convidadosIds.map(id => db.obterUsuario(id)?.nome || 'Aventureiro');
+
+        const texto = `🚨 *CONVITE DE ASSALTO!* 🚨\n\n👤 *${user.nome}* está montando uma equipe para emboscar um Carro-Forte!\n\n👥 *Convocados:* ${nomesConvidados.join(', ')}\n\n👉 *Como entrar:* Respondam a esta exata mensagem com o comando:\n!aceitar-roubo`;
+
+        const sentMsg = await sock.sendMessage(remetente, { text: texto, mentions: convidadosRaw }, { quoted: msg });
+
+        // Cria a sessão temporária na memória global
+        global.activeHeists = global.activeHeists || new Map();
+        global.activeHeists.set(sentMsg.key.id, {
+            tipo: 'carro',
+            lider: senderId,
+            convidados: convidadosIds,
+            aceitos: [senderId], // Lider já entra aceito
+            chatId: remetente,
+            timer: setTimeout(() => {
+                if (global.activeHeists.has(sentMsg.key.id)) {
+                    sock.sendMessage(remetente, { text: `⏳ O Carro-Forte escapou! O tempo de preparação esgotou.` }, { quoted: sentMsg });
+                    global.activeHeists.delete(sentMsg.key.id);
+                }
+            }, 5 * 60 * 1000) // Convite dura 5 minutos
+        });
+    }
+};
+const { downloadContentFromMessage, getContentType } = require('@whiskeysockets/baileys');
+const { exec } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const util = require('util');
+const execPromise = util.promisify(exec);
+
+module.exports = {
+    name: 's',
+    execute: async (sock, msg, args) => {
+        try {
+            // 1. EXTRAÇÃO DIRETA DA MENSAGEM
+            let messageContent = msg.message;
+            
+            // Se for resposta (Quoted), foca no que foi respondido
+            if (msg.message?.extendedTextMessage?.contextInfo?.quotedMessage) {
+                messageContent = msg.message.extendedTextMessage.contextInfo.quotedMessage;
+            }
+
+            // Função para localizar a imagem ignorando camadas de Visualização Única
+            const getMedia = (m) => {
+                if (m?.imageMessage) return m.imageMessage;
+                if (m?.viewOnceMessageV2?.message?.imageMessage) return m.viewOnceMessageV2.message.imageMessage;
+                if (m?.viewOnceMessageV2Extension?.message?.imageMessage) return m.viewOnceMessageV2Extension.message.imageMessage;
+                return null;
+            };
+
+            const target = getMedia(messageContent);
+
+            if (!target) {
+                return await sock.sendMessage(msg.key.remoteJid, { text: "⚠️ *DAEMON-XBOT:* Não achei a foto. Tente responder a imagem novamente." });
+            }
+
+            // ⚡ TRAVA DE SEGURANÇA: Verifica se a chave de criptografia ainda existe
+            if (!target.mediaKey) {
+                return await sock.sendMessage(msg.key.remoteJid, { text: "❌ *ERRO:* O WhatsApp já apagou a chave dessa mídia. Peça para mandarem a foto de novo!" });
+            }
+
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "⏳", key: msg.key } });
+
+            // 2. DOWNLOAD PARA A MEMÓRIA DO BOT
+            const stream = await downloadContentFromMessage(target, 'image');
+            let buffer = Buffer.from([]);
+            for await (const chunk of stream) { buffer = Buffer.concat([buffer, chunk]); }
+
+            const workDir = process.cwd();
+            const timestamp = Date.now();
+            const input = path.join(workDir, `temp_in_${timestamp}.jpg`);
+            const output = path.join(workDir, `temp_out_${timestamp}.webp`);
+            const exif = path.join(workDir, `temp_meta_${timestamp}.exif`);
+
+            fs.writeFileSync(input, buffer);
+
+            // 3. CONVERSÃO FFmpeg (Transparência Total)
+            const filter = `"format=rgba,scale=512:512:force_original_aspect_ratio=decrease,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=0x00000000"`;
+            const ffmpegCmd = `ffmpeg -i "${input}" -vcodec libwebp -vf ${filter} -loop 0 -preset default -an -fps_mode vfr "${output}"`;
+            
+            await execPromise(ffmpegCmd);
+
+            // 4. METADADOS DO AUTOR
+            const nomeUsuario = msg.pushName || "Utilizador";
+            const exifData = { 
+                "sticker-pack-id": "daemonx.bot", 
+                "sticker-pack-name": "DAEMON-XBOT", 
+                "sticker-pack-publisher": `${nomeUsuario} | DAEMON-XBOT` 
+            };
+            
+            const exifHeader = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
+            const jsonBuffer = Buffer.from(JSON.stringify(exifData), 'utf8');
+            const exifFinal = Buffer.concat([exifHeader, jsonBuffer]);
+            exifFinal.writeUIntLE(jsonBuffer.length, 14, 4);
+            fs.writeFileSync(exif, exifFinal);
+
+            await execPromise(`webpmux -set exif "${exif}" "${output}" -o "${output}"`);
+
+            // 5. ENVIO E LIMPEZA
+            await sock.sendMessage(msg.key.remoteJid, { sticker: fs.readFileSync(output) }, { quoted: msg });
+            await sock.sendMessage(msg.key.remoteJid, { react: { text: "✅", key: msg.key } });
+
+            setTimeout(() => {
+                [input, output, exif].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+            }, 3000);
+
+        } catch (e) {
+            console.error("ERRO NO STICKER:", e.message);
+            await sock.sendMessage(msg.key.remoteJid, { text: "❌ *DAEMON-XBOT:* Falha crítica no processamento da imagem." });
+        }
+    }
+}
+const db = require('../db');
+
+function money(valor) {
+    return `R$ ${Number(valor || 0).toLocaleString('pt-BR')}`;
+}
+
+module.exports = {
+    name: 'sacar',
+    execute: async (sock, msg, args) => {
+        const id = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        const user = db.obterUsuario(id);
+        if (!user) return;
+
+        const valorBruto = args[0];
+        if (!valorBruto) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃           ❌ SAQUE INVÁLIDO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+Use assim:
+!sacar 1000`
+            }, { quoted: msg });
+        }
+
+        const valor = Number(String(valorBruto).replace(/\D/g, '').slice(0, 15));
+        if (!Number.isFinite(valor) || valor <= 0) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         ❌ VALOR INVÁLIDO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+Digite um número maior que zero.`
+            }, { quoted: msg });
+        }
+
+        const carteira = Number(user.dinheiro || 0);
+        const banco = Number(user.banco || 0);
+
+        if (valor > banco) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃         ❌ SALDO NO BANCO INSUFICIENTE
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+💰 Carteira: ${money(carteira)}
+🏦 Banco: ${money(banco)}
+
+Você não tem esse valor no banco.`
+            }, { quoted: msg });
+        }
+
+        const novoDinheiro = carteira + valor;
+        const novoBanco = banco - valor;
+
+        db.salvar(id, {
+            dinheiro: novoDinheiro,
+            banco: novoBanco
+        });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃            🏧 𝑺𝑨𝑸𝑼𝑬 𝑹𝑬𝑨𝑳
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 Usuário: ${user.nome || msg.pushName || 'Usuário'}
+➖ Sacado: ${money(valor)}
+💰 Carteira: ${money(novoDinheiro)}
+🏦 Banco: ${money(novoBanco)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✔ Operação concluída com sucesso`;
+
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+
+function money(valor) {
+    return `R$ ${Number(valor || 0).toLocaleString('pt-BR')}`;
+}
+
+function barraXp(xpAtual, xpNecessario) {
+    const total = 20;
+    const pct = xpNecessario > 0 ? Math.min(100, Math.max(0, (xpAtual / xpNecessario) * 100)) : 0;
+    const cheio = Math.round((pct / 100) * total);
+    return '█'.repeat(cheio) + '░'.repeat(total - cheio);
+}
+
+module.exports = {
+    name: 'saldo',
+    execute: async (sock, msg, args) => {
+        const alvoBruto = args.join(' ').trim();
+        const id = alvoBruto
+            ? db.normalizarId(alvoBruto)
+            : db.normalizarId(msg.key.participant || msg.key.remoteJid);
+
+        const user = db.obterUsuario(id);
+        if (!user) {
+            return sock.sendMessage(msg.key.remoteJid, {
+                text: `╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃          ❌ SALDO NÃO ENCONTRADO
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+Esse usuário ainda não está registrado.`
+            }, { quoted: msg });
+        }
+
+        const nome = msg.pushName || user.nome || 'Usuário';
+        const dinheiro = Number(user.dinheiro || 0);
+        const banco = Number(user.banco || 0);
+        const total = dinheiro + banco;
+        const level = Number(user.level || 1);
+        const xpAtual = Number(user.xp || 0);
+        const xpNecessario = 100 * (level * level);
+        const faltaXP = Math.max(0, xpNecessario - xpAtual);
+        const emprego = user.emprego || 'Auxiliar Geral';
+        const status = user.status || 'Solteiro(a)';
+        const mensagens = Number(user.mensagens || 0);
+        const comandos = Number(user.comandos || 0);
+        const tempoAtivo = Number(user.tempoAtivo || 0);
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃           💎 𝑺𝑨𝑳𝑫𝑶 𝑹𝑬𝑨𝑳 💎           ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 𝑼𝒔𝒖́𝒂𝒓𝒊𝒐: ${nome}
+💼 𝑬𝒎𝒑𝒓𝒆𝒈𝒐: ${emprego}
+💞 𝑺𝒕𝒂𝒕𝒖𝒔: ${status}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 𝑪𝒂𝒓𝒕𝒆𝒊𝒓𝒂: ${money(dinheiro)}
+🏦 𝑩𝒂𝒏𝒄𝒐: ${money(banco)}
+💎 𝑻𝒐𝒕𝒂𝒍: ${money(total)}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⭐ 𝑳𝒆𝒗𝒆𝒍: ${level} / 100
+✨ 𝑿𝑷: ${xpAtual.toLocaleString('pt-BR')} / ${xpNecessario.toLocaleString('pt-BR')}
+⏳ 𝑷𝒓𝒐𝒈𝒓𝒆𝒔𝒔𝒐: [${barraXp(xpAtual, xpNecessario)}]
+🕒 𝑭𝒂𝒍𝒕𝒂: ${faltaXP.toLocaleString('pt-BR')} XP
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📨 𝑴𝒆𝒏𝒔𝒂𝒈𝒆𝒏𝒔: ${mensagens.toLocaleString('pt-BR')}
+⚙️ 𝑪𝒐𝒎𝒂𝒏𝒅𝒐𝒔: ${comandos.toLocaleString('pt-BR')}
+⏱ 𝑻𝒆𝒎𝒑𝒐 𝒂𝒕𝒊𝒗𝒐: ${tempoAtivo.toLocaleString('pt-BR')}s
+
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`;
+
+        await sock.sendMessage(msg.key.remoteJid, {
+            text: texto
+        }, { quoted: msg });
+    }
+};
+const os = require('os');
+const db = require('../db');
+
+module.exports = {
+    name: 'teste',
+    execute: async (sock, msg, args) => {
+        const reis = ['554896669255', '161830827753644'];
+        const remetente = db.normalizarId(msg.key.participant || msg.key.remoteJid);
+        if (!reis.includes(remetente)) return;
+
+        const memTotal = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2);
+        const memLivre = (os.freemem() / 1024 / 1024 / 1024).toFixed(2);
+        const memUsada = (memTotal - memLivre).toFixed(2);
+        const uptimeSegundos = os.uptime();
+        const horas = Math.floor(uptimeSegundos / 3600);
+        const minutos = Math.floor((uptimeSegundos % 3600) / 60);
+
+        const statusTexto = `📊 *HARDWARE STATUS*\n\n✅ *Uptime:* ${horas}h ${minutos}m\n📈 *RAM:* ${memUsada}GB / ${memTotal}GB\n⚙️ *Arch:* ${os.arch()}\n🟢 Conexão: Estável`;
+        await sock.sendMessage(msg.key.remoteJid, { text: statusTexto }, { quoted: msg });
+    }
+}
+const db = require('../db');
+
+// 🔥 SISTEMA DE LOCK (Anti-Spam Supremo)
+const activeLocks = new Set();
+
+module.exports = {
+    name: 'tigrinho',
+    execute: async (sock, msg, args) => {
+        const remetente = msg.key.remoteJid;
+        const id = db.normalizarId(msg.key.participant || remetente);
+
+        if (activeLocks.has(id)) {
+            return await sock.sendMessage(remetente, { react: { text: "⏳", key: msg.key } });
+        }
+
+        let user = db.obterUsuario(id);
+        if (!user) return;
+
+        const aposta = parseInt(args[0]);
+        if (isNaN(aposta) || aposta < 50) {
+            return await sock.sendMessage(remetente, { text: "❌ *Mínimo:* R$ 50 para girar a plataforma." }, { quoted: msg });
+        }
+
+        if ((user.dinheiro || 0) < aposta) {
+            return await sock.sendMessage(remetente, { text: "❌ *O Tigre recusa fiado! Saldo insuficiente.*" }, { quoted: msg });
+        }
+
+        activeLocks.add(id);
+
+        try {
+            // 1. O TIGRE JÁ COME O DINHEIRO AQUI
+            user.dinheiro -= aposta;
+            
+            // 2. SISTEMA DE VÍCIO (RTP DINÂMICO)
+            user.jogadasTigrinho = (user.jogadasTigrinho || 0) + 1;
+            db.salvar(id, user);
+
+            const emojis = ['🍊', '🏮', '🧨', '💰', '🧧', '🐯'];
+            const getRandom = () => emojis[Math.floor(Math.random() * emojis.length)];
+            
+            let multiplicador = 0;
+            let soltouCartinha = false;
+            let chance = Math.random() * 100;
+
+            // Lógica Maligna do Tigrinho
+            if (user.jogadasTigrinho <= 3) {
+                // FASE 1: Fisgando o trouxa (Boas chances de ganhar)
+                if (chance < 40) multiplicador = 2; // Dobra
+                else if (chance < 70) multiplicador = 1.5; // Ganha um pouco
+                else multiplicador = 0;
+            } else {
+                // FASE 2: Puxada de Tapete (O Tigre cobra a conta)
+                if (chance < 2) { 
+                    multiplicador = 10; // 2% de soltar a CARTINHA
+                    soltouCartinha = true;
+                    user.jogadasTigrinho = 0; // Reseta o vício se ele estourar a boa
+                } else if (chance < 15) {
+                    multiplicador = 1.5; // Migalha pra não parar de jogar
+                } else {
+                    multiplicador = 0; // Perde tudo
+                }
+            }
+
+            // Se o cara já jogou muito e não ganha a cartinha, a gente reseta o azar de vez em quando
+            if (user.jogadasTigrinho > 15 && Math.random() < 0.2) {
+                user.jogadasTigrinho = 0; 
+            }
+
+            const ganho = Math.floor(aposta * multiplicador);
+
+            // Gerador de grade 3x3
+            let slotsFinal = [];
+            if (soltouCartinha) {
+                slotsFinal = [
+                    ['🧧', '🐯', '🧧'],
+                    ['🐯', '💰', '🐯'],
+                    ['🧧', '🐯', '🧧']
+                ];
+            } else if (multiplicador > 0) {
+                // Faz pelo menos a linha do meio bater
+                const e = getRandom();
+                slotsFinal = [
+                    [getRandom(), getRandom(), getRandom()],
+                    [e, e, e],
+                    [getRandom(), getRandom(), getRandom()]
+                ];
+            } else {
+                slotsFinal = [
+                    [getRandom(), getRandom(), getRandom()],
+                    [getRandom(), getRandom(), getRandom()],
+                    [getRandom(), getRandom(), getRandom()]
+                ];
+            }
+
+            const formatGrid = (grid) => `[ ${grid[0].join(' | ')} ]\n┃   [ ${grid[1].join(' | ')} ]\n┃   [ ${grid[2].join(' | ')} ]`;
+
+            const buildLayout = (gridText, statusTexto) => `
+╭━━━━━━━『 🐯 𝑭𝑶𝑹𝑻𝑼𝑵𝑬 𝑻𝑰𝑮𝑬𝑹 』━━━━━━━╮
+┃
+┃   ${gridText}
+┃
+┣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┃ 💸 *Aposta:* R$ ${aposta.toLocaleString('pt-BR')}
+┃ 
+┃ ${statusTexto}
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+            // ANIMAÇÃO 3X3 (Visual do Tigrinho rodando)
+            const sentMsg = await sock.sendMessage(remetente, { 
+                text: buildLayout(formatGrid([
+                    ['🔄', '🔄', '🔄'], ['🔄', '🐯', '🔄'], ['🔄', '🔄', '🔄']
+                ]), "🔥 *O TIGRE TÁ GIRANDO...*") 
+            }, { quoted: msg });
+
+            for (let i = 0; i < 4; i++) {
+                await new Promise(r => setTimeout(r, 500));
+                let animGrid = [
+                    [getRandom(), getRandom(), getRandom()],
+                    [getRandom(), '🐯', getRandom()],
+                    [getRandom(), getRandom(), getRandom()]
+                ];
+                
+                // Se for dar a cartinha, ameaça no meio da animação
+                let aviso = soltouCartinha ? "⚠️ *O TIGRE TÁ AMEAÇANDO!*" : "🔥 *O TIGRE TÁ GIRANDO...*";
+                
+                await sock.sendMessage(remetente, { 
+                    text: buildLayout(formatGrid(animGrid), aviso), 
+                    edit: sentMsg.key 
+                });
+            }
+
+            // 3. PAGAMENTO
+            let userFinal = db.obterUsuario(id); 
+            if (ganho > 0) {
+                userFinal.dinheiro += ganho;
+                db.salvar(id, userFinal);
+            }
+
+            let statusFinal = "";
+            let emojiReacao = "";
+
+            if (soltouCartinha) {
+                statusFinal = `🐅 *SOLTOU A CARTINHA!!! MEGA GANHO!*\n💰 *Prêmio:* R$ ${ganho.toLocaleString('pt-BR')}`;
+                emojiReacao = "🧧";
+            } else if (multiplicador > 0) {
+                statusFinal = `🎉 *GANHOU ${multiplicador}X!*\n💰 *Prêmio:* R$ ${ganho.toLocaleString('pt-BR')}`;
+                emojiReacao = "🤑";
+            } else {
+                statusFinal = `❌ *O TIGRE LEVOU TUDO!*\nFaz o pix pra tentar recuperar.`;
+                emojiReacao = "🤡";
+            }
+
+            statusFinal += `\n💳 *Saldo Atual:* R$ ${userFinal.dinheiro.toLocaleString('pt-BR')}`;
+
+            // Edição Final
+            await sock.sendMessage(remetente, { react: { text: emojiReacao, key: sentMsg.key } });
+            await new Promise(r => setTimeout(r, 400));
+            await sock.sendMessage(remetente, { 
+                text: buildLayout(formatGrid(slotsFinal), statusFinal), 
+                edit: sentMsg.key 
+            });
+
+        } catch (error) {
+            console.log("❌ Erro no Tigrinho:", error);
+        } finally {
+            activeLocks.delete(id); // Libera o coitado pra jogar de novo
+        }
+    }
+};
+const db = require('../db');
+
+const salarios = {
+    "Lixeiro": { min: 120, max: 220, xp: 15 }, "Atendente": { min: 140, max: 240, xp: 18 },
+    "Faxineiro": { min: 160, max: 260, xp: 20 }, "Entregador": { min: 180, max: 300, xp: 22 },
+    "Estoquista": { min: 220, max: 360, xp: 24 }, "Padeiro": { min: 260, max: 420, xp: 26 },
+    "Caixa de Loja": { min: 300, max: 500, xp: 28 }, "Motorista": { min: 380, max: 650, xp: 32 },
+    "Jardineiro": { min: 450, max: 750, xp: 34 }, "Gerente de Loja": { min: 700, max: 1100, xp: 42 },
+    "Mecânico": { min: 850, max: 1350, xp: 46 }, "Designer": { min: 1000, max: 1600, xp: 50 },
+    "Pedreiro": { min: 1200, max: 1900, xp: 54 }, "Cozinheiro": { min: 1400, max: 2200, xp: 58 },
+    "Locutor": { min: 1700, max: 2600, xp: 62 }, "Professor": { min: 2000, max: 3000, xp: 66 },
+    "Segurança": { min: 2300, max: 3400, xp: 70 }, "Enfermeiro": { min: 2600, max: 3800, xp: 74 },
+    "Empresário": { min: 3000, max: 4500, xp: 78 }, "Cientista": { min: 3400, max: 5000, xp: 82 }
+};
+
+function barraProgresso(porcentagem) {
+    const total = 20;
+    const preenchido = Math.max(0, Math.min(total, Math.round((porcentagem / 100) * total)));
+    const vazio = total - preenchido;
+    return '█'.repeat(preenchido) + '░'.repeat(vazio);
+}
+
+module.exports = {
+    name: 'trabalhar',
+    execute: async (sock, msg, args) => {
+        const id = msg.key.participant; // Puxado limpo direto do nosso motor central
+        const remetente = msg.key.remoteJid;
+        const user = db.obterUsuario(id);
+
+        if (!user) {
+            return sock.sendMessage(remetente, { text: "❌ Perfil não encontrado." }, { quoted: msg });
+        }
+
+        // --- SISTEMA DE COOLDOWN DE 5 MINUTOS ---
+        const cooldownMs = 5 * 60 * 1000;
+        const agora = Date.now();
+        const ultimoTrabalho = user.ultimoTrabalho || 0;
+
+        if (agora - ultimoTrabalho < cooldownMs) {
+            const tempoRestante = cooldownMs - (agora - ultimoTrabalho);
+            const minutos = Math.floor(tempoRestante / 60000);
+            const segundos = Math.floor((tempoRestante % 60000) / 1000);
+
+            return await sock.sendMessage(remetente, {
+                text: `⏳ *CALMA AÍ!* Você já trabalhou recentemente.\n\nDescanse um pouco e volte em *${minutos}m ${segundos}s*.`
+            }, { quoted: msg });
+        }
+        // ----------------------------------------
+
+        // 🛠️ PUXANDO O NOME EM VEZ DO NÚMERO
+        const nome = user.nome || msg.pushName || "Trabalhador";
+        const emprego = user.emprego || "Auxiliar Geral";
+        const job = salarios[emprego] || { min: 50, max: 150, xp: 10 };
+
+        const ganho = Math.floor(Math.random() * (job.max - job.min + 1)) + job.min;
+        const produtividade = Math.floor(Math.random() * 31) + 60;
+        const progresso = barraProgresso(produtividade);
+
+        await db.ganharXP(id, job.xp, sock, msg);
+
+        db.salvar(id, {
+            dinheiro: (user.dinheiro || 0) + ganho,
+            ultimoTrabalho: agora
+        });
+
+        const texto =
+`╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮
+┃           💼 !𝑻𝑹𝑨𝑩𝑨𝑳𝑯𝑨𝑹 💼            ┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯
+
+👤 𝑼𝒔𝒖𝒂́𝒓𝒊𝒐: ${nome}
+💼 𝑬𝒎𝒑𝒓𝒆𝒈𝒐: ${emprego}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+⏳ 𝑻𝒓𝒂𝒃𝒂𝒍𝒉𝒂𝒏𝒅𝒐...
+${progresso} ${produtividade}%
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+💰 𝑮𝒂𝒏𝒉𝒐𝒔:
+
++ R$ ${ganho.toLocaleString('pt-BR')}
+  ✨ +${job.xp} XP
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 𝑺𝒕𝒂𝒕𝒖𝒔:
+✔ 𝑻𝒓𝒂𝒃𝒂𝒍𝒉𝒐 𝒄𝒐𝒏𝒄𝒍𝒖́𝒅𝒐
+🔥 𝑷𝒓𝒐𝒅𝒖𝒕𝒊𝒗𝒊𝒅𝒂𝒅𝒆 𝒂𝒍𝒕𝒂
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`;
+
+        await sock.sendMessage(remetente, { text: texto }, { quoted: msg });
+    }
+};
+const db = require('../db');
+const produtos = require('../data/produtos');
+const receitas = require('../data/receitas');
+
+module.exports = {
+    name: 'vender',
+    execute: async (sock, msg, args) => {
+        const idItem = args[0];
+        const remetente = msg.key.remoteJid;
+        const id = db.normalizarId(msg.key.participant);
+        const user = db.obterUsuario(id);
+
+        if (!user || !user.inventario) return;
+
+        let item = produtos[idItem];
+        let isPrato = false;
+        let valorVenda = 0;
+
+        if (!item && receitas[idItem]) {
+            item = receitas[idItem];
+            isPrato = true;
+        }
+
+        if (!item) return sock.sendMessage(remetente, { text: "❌ ID inválido. Olhe os IDs na loja ou manual." }, { quoted: msg });
+
+        const index = user.inventario.indexOf(item.nome);
+        if (index === -1) {
+            return sock.sendMessage(remetente, { text: `❌ Você não tem *${item.nome}* na mochila pra vender!` }, { quoted: msg });
+        }
+
+        // Tira 1 da mochila
+        user.inventario.splice(index, 1);
+
+        // Sistema Dinâmico de Valores
+        if (isPrato) {
+            let custo = 0;
+            item.ingredientes.forEach(ingNome => {
+                const ingId = Object.keys(produtos).find(k => produtos[k].nome === ingNome);
+                if (ingId && produtos[ingId].preco) custo += produtos[ingId].preco;
+            });
+            valorVenda = Math.floor(custo * 1.5); // Lucro de 50% pro cozinheiro!
+            if (valorVenda === 0) valorVenda = 15;
+        } else {
+            valorVenda = Math.floor(item.preco * 0.5); // Vende item normal pelo prejuízo (50%)
+        }
+
+        user.dinheiro = (user.dinheiro || 0) + valorVenda;
+        db.salvar(id, user);
+
+        let txt = isPrato 
+            ? `🍱 Você vendeu o prato *${item.nome}* pro restaurante e faturou R$ ${valorVenda.toLocaleString('pt-BR')}! (Lucro na certa!)`
+            : `✅ Você vendeu *${item.nome}* por R$ ${valorVenda.toLocaleString('pt-BR')}!`;
+
+        await sock.sendMessage(remetente, { text: txt }, { quoted: msg });
+    }
+};
+const fs = require('fs');
+const path = require('path');
+
+module.exports = {
+    name: 'video4k',
+    execute: async (sock, msg, args) => {
+        // Caminho exato do Armazenamento Interno principal do Android
+        const caminhoVideos = '/storage/emulated/0/videos_bot';
+
+        try {
+            // 1. CHECAGEM DA PASTA
+            if (!fs.existsSync(caminhoVideos)) {
+                return await sock.sendMessage(msg.key.remoteJid, { text: "📂 *DAEMON-X:* A pasta 'videos_bot' não foi encontrada no Armazenamento Interno do celular." });
+            }
+
+            const arquivos = fs.readdirSync(caminhoVideos).filter(file => file.endsWith('.mp4'));
+            
+            if (arquivos.length === 0) {
+                return await sock.sendMessage(msg.key.remoteJid, { text: "📂 *DAEMON-X:* A base de dados está limpa. Nenhum vídeo .mp4 encontrado." });
+            }
+
+            // 2. SELEÇÃO E PREPARAÇÃO
+            const videoSorteado = arquivos[Math.floor(Math.random() * arquivos.length)];
+            const videoPath = path.join(caminhoVideos, videoSorteado);
+
+            // Manda o aviso de carregamento estiloso
+            await sock.sendMessage(msg.key.remoteJid, { text: "⏳ 〈 𝐈𝐍𝐈𝐂𝐈𝐀𝐍𝐃𝐎 𝐏𝐑𝐎𝐓𝐎𝐂𝐎𝐋𝐎 𝟒𝐊 〉\n_Renderizando mídia em alta performance..._" });
+
+            // 3. A INTERFACE SUPER LINDA (LEGENDA)
+            const layoutPremium = `
+╭━━━〈 🎦 𝐃𝐀𝐄𝐌𝐎𝐍-𝐗 𝐒𝐓𝐔𝐃𝐈𝐎𝐒 〉━━━╮
+┃
+┃ 🎬 ⧼ 𝟒𝐊 𝐔𝐋𝐓𝐑𝐀 𝐇𝐃 𝐏𝐑𝐄𝐒𝐄𝐍𝐓 ⧽
+┃ 
+┃ 🏷️ *Título:* ${videoSorteado.replace('.mp4', '')}
+┃ 📊 *Resolução:* 3840x2160p
+┃ 🎞️ *Framerate:* 60 FPS
+┃ ⚙️ *Codec:* H.264 (AVC1)
+┃ 🚀 *Host:* Galaxy A16 Server
+┃
+╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯`.trim();
+
+            // 4. ENVIO DO VÍDEO PARA TOCAR NO ZAP
+            await sock.sendMessage(msg.key.remoteJid, { 
+                video: fs.readFileSync(videoPath), 
+                caption: layoutPremium,
+                mimetype: 'video/mp4'
+            }, { quoted: msg });
+
+        } catch (error) {
+            console.error("Erro no processamento interno:", error);
+            await sock.sendMessage(msg.key.remoteJid, { text: "❌ *ERRO CRÍTICO:* Falha ao processar o arquivo de mídia." });
+        }
+    }
+}

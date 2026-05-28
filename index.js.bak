@@ -1,0 +1,255 @@
+process.on("uncaughtException", console.error);
+process.on("unhandledRejection", console.error);
+
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    fetchLatestBaileysVersion,
+    DisconnectReason,
+    makeCacheableSignalKeyStore
+} = require("@whiskeysockets/baileys");
+
+const fs = require("fs");
+const path = require("path");
+const pino = require("pino");
+const db = require("./db");
+const { isGroupAdmin } = require("./lib/permissoes");
+
+const commands = new Map();
+const commandsPath = path.join(__dirname, "commands");
+
+const spamTracker = new Map();
+const messageCache = new Map();
+
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function loadCommands() {
+    commands.clear();
+    if (!fs.existsSync(commandsPath)) {
+        console.log("❌ Pasta commands não existe");
+        return;
+    }
+    const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith(".js"));
+    for (const file of commandFiles) {
+        try {
+            delete require.cache[require.resolve(`./commands/${file}`)];
+            const cmd = require(`./commands/${file}`);
+            if (cmd?.name && typeof cmd.execute === "function") commands.set(cmd.name, cmd);
+        } catch (e) {
+            console.log(`❌ erro no comando ${file}:`, e.message);
+        }
+    }
+    console.log(`🚀 Total comandos carregados: ${commands.size}`);
+}
+
+function getText(msg) {
+    const m = msg?.message;
+    if (!m) return "";
+    return m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || "";
+}
+
+function tempo(ms) {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    const h = Math.floor(m / 60);
+    if (h > 0) return `${h}h ${m % 60}m`;
+    if (m > 0) return `${m}m ${s % 60}s`;
+    return `${s}s`;
+}
+
+async function start() {
+    const { state, saveCreds } = await useMultiFileAuthState("auth_info_baileys");
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+        version,
+        auth: {
+            creds: state.creds,
+            keys: makeCacheableSignalKeyStore(state.keys, pino({ level: "silent" }))
+        },
+        printQRInTerminal: false,
+        browser: ["Ubuntu", "Chrome", "20.0.04"],
+        logger: pino({ level: "silent" })
+    });
+
+    if (!sock.authState.creds.registered) {
+        console.log("⏳ Preparando para solicitar o código...");
+        setTimeout(async () => {
+            try {
+                const numeroDoBot = "554896669255";
+                const code = await sock.requestPairingCode(numeroDoBot);
+                console.log("\n======================================================");
+                console.log("📱 CÓDIGO DE PAREAMENTO DO WHATSAPP: " + code);
+                console.log("======================================================\n");
+            } catch (err) {
+                console.log("⚠️ Erro ao pedir o código:", err.message);
+            }
+        }, 4000);
+    }
+
+    sock.ev.on("creds.update", saveCreds);
+
+    sock.ev.on("connection.update", (u) => {
+        if (u.connection) console.log("🔌 connection:", u.connection);
+        if (u.connection === "open") console.log("🟢 BOT ONLINE (sessão ativa)");
+        if (u.connection === "close") {
+            const code = u.lastDisconnect?.error?.output?.statusCode;
+            console.log("🔴 desconectado (código):", code);
+            if (code !== DisconnectReason.loggedOut) start();
+        }
+    });
+
+    sock.ev.on("messages.upsert", async (m) => {
+        if (m.type !== "notify" && m.type !== "append") return;
+
+        for (const msg of m.messages) {
+            try {
+                if (!msg.message || msg.key.remoteJid === "status@broadcast") continue;
+
+                const jid = msg.key.remoteJid;
+                const isGroup = jid.endsWith("@g.us");
+
+                const isRevoke = msg.message.protocolMessage?.type === 14;
+                if (isRevoke && isGroup) {
+                    const deletedId = msg.message.protocolMessage.key.id;
+                    const gruposPath = "./grupos.json";
+                    if (!fs.existsSync(gruposPath)) fs.writeFileSync(gruposPath, JSON.stringify({}));
+                    const grupos = JSON.parse(fs.readFileSync(gruposPath, "utf8"));
+
+                    if (grupos[jid] && grupos[jid].apagadas) {
+                        if (messageCache.has(deletedId)) {
+                            const originalMsg = messageCache.get(deletedId);
+                            const senderApagado = originalMsg.key.participant || originalMsg.key.remoteJid;
+                            const textoApagado = getText(originalMsg);
+                            const objUser = db.obterUsuario(db.normalizarId(senderApagado));
+                            const nomeApagado = objUser?.nome || originalMsg.pushName || "Desconhecido";
+
+                            const apagadasPath = "./apagadas.json";
+                            if (!fs.existsSync(apagadasPath)) fs.writeFileSync(apagadasPath, JSON.stringify({}));
+                            const dbApagadas = JSON.parse(fs.readFileSync(apagadasPath, "utf8"));
+
+                            if (!dbApagadas[jid]) dbApagadas[jid] = [];
+                            dbApagadas[jid].push({
+                                id: db.normalizarId(senderApagado),
+                                numero: senderApagado.split('@')[0],
+                                nome: nomeApagado,
+                                texto: textoApagado || "[Mídia/Áudio/Figurinha apagada]",
+                                data: new Date().toLocaleString("pt-BR")
+                            });
+
+                            if (dbApagadas[jid].length > 15) dbApagadas[jid].shift();
+                            fs.writeFileSync(apagadasPath, JSON.stringify(dbApagadas, null, 2));
+                        }
+                    }
+                    continue;
+                } else if (msg.key && msg.key.id) {
+                    messageCache.set(msg.key.id, msg);
+                    if (messageCache.size > 1000) {
+                        const firstKey = messageCache.keys().next().value;
+                        messageCache.delete(firstKey);
+                    }
+                }
+
+                const msgTimestamp = msg.messageTimestamp;
+                const nowUnix = Math.floor(Date.now() / 1000);
+                if (msgTimestamp && (nowUnix - msgTimestamp > 60)) continue;
+
+                const body = getText(msg);
+                const trimmedBody = body.trim();
+                let sender = msg.key.fromMe ? sock.user.id.split(":")[0] + "@s.whatsapp.net" : (msg.key.participant || msg.key.remoteJid);
+                const id = db.normalizarId(sender);
+
+                if (trimmedBody.startsWith("!")) {
+                    db.registrar(sender, msg.pushName || "Novato");
+                }
+
+                const user = db.obterUsuario(id);
+
+                if (isGroup) {
+                    const gruposPath = "./grupos.json";
+                    if (!fs.existsSync(gruposPath)) fs.writeFileSync(gruposPath, JSON.stringify({}));
+                    const grupos = JSON.parse(fs.readFileSync(gruposPath, "utf8"));
+                    const configGrupo = grupos[jid] || {};
+
+                    if (configGrupo.mutados && configGrupo.mutados.includes(sender)) {
+                        await sock.sendMessage(jid, { delete: msg.key });
+                        continue;
+                    }
+
+                    const isAdmin = await isGroupAdmin(sock, jid, sender);
+                    const isDonoBot = id === "554896669255";
+                    const isImmune = isAdmin || isDonoBot || msg.key.fromMe;
+                    const botId = sock.user.id.includes(":") ? sock.user.id.split(":")[0] + "@s.whatsapp.net" : sock.user.id;
+                    const isBotAdmin = await isGroupAdmin(sock, jid, botId);
+
+                    if (configGrupo.antiSpam && !isImmune) {
+                        const now = Date.now();
+                        const cacheKey = `${jid}-${sender}`;
+                        if (!spamTracker.has(cacheKey)) {
+                            spamTracker.set(cacheKey, { count: 1, firstTime: now });
+                        } else {
+                            const data = spamTracker.get(cacheKey);
+                            if (now - data.firstTime <= 2000) {
+                                data.count += 1;
+                                if (data.count >= 3) {
+                                    if (isBotAdmin) {
+                                        await sock.sendMessage(jid, { delete: msg.key });
+                                        await sock.sendMessage(jid, { text: `🚫 @${sender.split('@')[0]} foi banido por *SPAM*!`, mentions: [sender] });
+                                        await sock.groupParticipantsUpdate(jid, [sender], "remove");
+                                    }
+                                    spamTracker.delete(cacheKey);
+                                    continue;
+                                }
+                                spamTracker.set(cacheKey, data);
+                            } else {
+                                spamTracker.set(cacheKey, { count: 1, firstTime: now });
+                            }
+                        }
+                    }
+
+                    const antiLinkAtivo = configGrupo.antilink === true || configGrupo["anti-link"] === true;
+                    if (antiLinkAtivo && /(https?:\/\/|chat\.whatsapp\.com|wa\.me)/i.test(body) && !isImmune) {
+                        if (isBotAdmin) {
+                            await sock.sendMessage(jid, { delete: msg.key });
+                            await sock.sendMessage(jid, { text: "⚠️ Não é permitido enviar links!", mentions: [sender] });
+                            await sock.groupParticipantsUpdate(jid, [sender], "remove");
+                        }
+                        continue;
+                    }
+                    if (trimmedBody.startsWith("!") && configGrupo.soaAdm === true && !isImmune) continue;
+                }
+
+                if (user?.afk?.status) {
+                    const diff = Date.now() - user.afk.desde;
+                    db.salvar(id, { afk: { status: false, motivo: "", desde: 0 } });
+                    await sock.sendMessage(jid, { text: `👋 *Bem-vindo de volta!*\n⏳ Você ficou AFK por: ${tempo(diff)}` }, { quoted: msg });
+                }
+
+                const mentions = msg.message?.extendedTextMessage?.contextInfo?.mentionedJid || [];
+                for (const mId of mentions) {
+                    const mid = db.normalizarId(mId);
+                    const u = db.obterUsuario(mid);
+                    if (u?.afk?.status) await sock.sendMessage(jid, { text: `💤 Esse usuário está AFK\n📝 Motivo: ${u.afk.motivo}` }, { quoted: msg });
+                }
+
+                if (!trimmedBody.startsWith("!")) continue;
+
+                const args = trimmedBody.slice(1).trim().split(/ +/);
+                const cmdName = args.shift().toLowerCase();
+                const cmd = commands.get(cmdName);
+
+                if (!cmd) continue;
+
+                console.log(`⚡ EXECUTANDO CMD: ${cmdName} | Solicitado por: ${id}`);
+                await cmd.execute(sock, msg, args);
+
+            } catch (e) {
+                if (!e.message.includes("rate-overlimit")) console.log("🔴 ERRO:", e.message);
+            }
+        }
+    });
+
+    loadCommands();
+}
+
+start();

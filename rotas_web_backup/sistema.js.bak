@@ -1,0 +1,24 @@
+const path = require('path');
+module.exports = (app, checkAuth, db, configWeb) => {
+    
+    app.get('/', (req, res) => {
+        if ((req.cookies.userId || '').replace('@s.whatsapp.net', '')) return res.redirect('/os');
+        res.sendFile(path.join(__dirname, '../views/login.html'));
+    });
+
+    app.get('/os', checkAuth, (req, res) => res.sendFile(path.join(__dirname, '../views/os.html')));
+
+    app.post('/api/login', (req, res) => {
+        const { id } = req.body;
+        // Normalizamos o ID logo no login para garantir
+        const idLimpo = db.normalizarId(id);
+        const user = db.obterUsuario(idLimpo);
+        
+        if (user) {
+            res.cookie('userId', idLimpo, { maxAge: 86400000, httpOnly: true });
+            res.json({ ok: true });
+        } else {
+            res.status(401).json({ erro: 'ID não encontrado no Bot!' });
+        }
+    });
+};

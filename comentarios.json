@@ -1,0 +1,52 @@
+{
+  "Tiktok1": [
+    {
+      "id": "1778340894085",
+      "nome": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+      "email": "negao275@daemon.com",
+      "texto": "Oi",
+      "tempo": "agora",
+      "likes": 0,
+      "replies": [
+        {
+          "id": "1778340913406",
+          "nome": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+          "email": "negao275@daemon.com",
+          "texto": "..",
+          "tempo": "agora",
+          "likes": 0,
+          "replies": []
+        }
+      ]
+    }
+  ],
+  "Tiktok2": [
+    {
+      "id": "1778341366038",
+      "nome": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+      "email": "negao275@daemon.com",
+      "texto": "Oi",
+      "timestamp": 1778341366038,
+      "likes": 0,
+      "replies": []
+    },
+    {
+      "id": "1778341105767",
+      "nome": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+      "email": "negao275@daemon.com",
+      "texto": "Oi",
+      "timestamp": 1778341105769,
+      "likes": 0,
+      "replies": []
+    },
+    {
+      "id": "1778340929694",
+      "nome": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+      "email": "negao275@daemon.com",
+      "texto": "King vonnn",
+      "tempo": "agora",
+      "likes": 0,
+      "replies": []
+    }
+  ]
+}

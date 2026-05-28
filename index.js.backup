@@ -1,0 +1,137 @@
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    fetchLatestBaileysVersion
+} = require('@whiskeysockets/baileys');
+
+const { Boom } = require('@hapi/boom');
+const fs = require('fs');
+const path = require('path');
+const pino = require('pino');
+
+const db = require('./db');
+const config = require('./config.json');
+
+async function connectToWhatsApp() {
+    const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
+    const { version } = await fetchLatestBaileysVersion();
+
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false,
+        browser: ['Ubuntu', 'Chrome', '20.0.04'],
+        syncFullHistory: false,
+        markOnlineOnConnect: true
+    });
+
+    sock.ev.on('creds.update', saveCreds);
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+
+        if (connection === 'close') {
+            const statusCode = lastDisconnect?.error instanceof Boom
+                ? lastDisconnect.error.output?.statusCode
+                : lastDisconnect?.error?.output?.statusCode;
+
+            const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+
+            console.log(`❌ Conexão fechada. Status: ${statusCode ?? 'n/a'} | Reconectar: ${shouldReconnect}`);
+
+            if (shouldReconnect) {
+                setTimeout(connectToWhatsApp, 2000);
+            } else {
+                console.log('⚠️ Bot deslogado. Precisa reconectar com QR.');
+            }
+        } else if (connection === 'open') {
+            console.log('\n\x1b[36m┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓\x1b[0m');
+            console.log('\x1b[36m┃     ✅ SISTEMA HÍBRIDO ATIVO!      ┃\x1b[0m');
+            console.log('\x1b[36m┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛\x1b[0m\n');
+        }
+    });
+
+    sock.ev.on('messages.upsert', async (m) => {
+        try {
+            const msg = m.messages?.[0];
+            if (!msg || !msg.message) return;
+            if (msg.key.remoteJid === 'status@broadcast') return;
+
+            const remetente = msg.key.remoteJid;
+            const quemEnviou = msg.key.participant || remetente;
+
+            if (!quemEnviou || quemEnviou.includes('@newsletter')) return;
+
+            const prefix = config.prefix || '!';
+            const body =
+                msg.message.conversation ||
+                msg.message.extendedTextMessage?.text ||
+                msg.message.imageMessage?.caption ||
+                '';
+
+            const isCommand = body.startsWith(prefix);
+            const registrado = db.estaRegistrado(quemEnviou);
+
+            if (isCommand && !registrado) {
+                const nome = msg.pushName || 'Usuário';
+                db.registrar(quemEnviou, nome);
+
+                await sock.sendMessage(remetente, {
+                    text: `✨ *Bem-vindo(a), ${nome}!* Você usou um comando e agora está registrado. A partir de agora, suas mensagens rendem XP e Tempo Ativo! 🚀`
+                }, { quoted: msg });
+            }
+
+            if (db.estaRegistrado(quemEnviou)) {
+                const user = db.obterUsuario(quemEnviou);
+                db.salvar(quemEnviou, {
+                    nome: msg.pushName || user.nome,
+                    mensagens: (user.mensagens || 0) + 1,
+                    tempoAtivo: (user.tempoAtivo || 0) + 30
+                });
+
+                await db.ganharXP(quemEnviou, 1, sock, msg);
+            } else {
+                return;
+            }
+
+            if (!isCommand) return;
+
+            const rawArgs = body.slice(prefix.length).trim().split(/\s+/).filter(Boolean);
+            const commandName = rawArgs.shift()?.toLowerCase();
+
+            if (!commandName) return;
+
+            const commandFile = path.join(__dirname, 'commands', `${commandName}.js`);
+
+            if (!fs.existsSync(commandFile)) {
+                return;
+            }
+
+            try {
+                delete require.cache[require.resolve(commandFile)];
+                const command = require(commandFile);
+
+                if (typeof command.execute !== 'function') {
+                    throw new Error(`Comando ${commandName} não exporta execute()`);
+                }
+
+                await command.execute(sock, msg, rawArgs);
+
+                const u = db.obterUsuario(quemEnviou);
+                if (u) {
+                    db.salvar(quemEnviou, { comandos: (u.comandos || 0) + 1 });
+                }
+            } catch (error) {
+                console.error(`❌ Erro em !${commandName}:`, error);
+            }
+        } catch (error) {
+            console.error('❌ Erro no handler de mensagens:', error);
+        }
+    });
+}
+
+connectToWhatsApp().catch((error) => {
+    console.error('❌ Falha ao iniciar o bot:', error);
+});

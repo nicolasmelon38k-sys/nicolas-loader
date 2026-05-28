@@ -1,0 +1,22 @@
+module.exports = {
+    "1": { nome: "🐺 Alfa da Floresta", recompensa: 500, drop: "item raro", video: "boss1.mp4" },
+    "2": { nome: "🦂 Escorpião de Areia", recompensa: 650, drop: "item raro", video: "boss2.mp4" },
+    "3": { nome: "🪨 Guardião de Pedra", recompensa: 800, drop: "item raro", video: "boss3.mp4" },
+    "4": { nome: "🔥 Golem de Brasas", recompensa: 1000, drop: "item raro", video: "boss4.mp4" },
+    "5": { nome: "🌊 Serpente Abissal", recompensa: 1300, drop: "item raro", video: "boss5.mp4" },
+    "6": { nome: "🌪️ Caçador da Tempestade", recompensa: 1500, drop: "item raro", video: "boss6.mp4" },
+    "7": { nome: "🦴 Rei dos Ossos", recompensa: 1800, drop: "item épico", video: "boss7.mp4" },
+    "8": { nome: "🕷️ Rainha Venenosa", recompensa: 2000, drop: "item épico", video: "boss8.mp4" },
+    "9": { nome: "🪙 Dragão de Bronze", recompensa: 2500, drop: "item épico", video: "boss9.mp4" },
+    "10": { nome: "🌑 Cavaleiro do Eclipse", recompensa: 3000, drop: "item épico", video: "boss10.mp4" },
+    "11": { nome: "🧙 Arcanista Caído", recompensa: 3500, drop: "item épico", video: "boss11.mp4" },
+    "12": { nome: "🐉 Guardião Dracônico", recompensa: 4200, drop: "item épico", video: "boss12.mp4" },
+    "13": { nome: "⚔️ General Sem Nome", recompensa: 5000, drop: "item lendário", video: "boss13.mp4" },
+    "14": { nome: "🔮 Senhor das Runas", recompensa: 6200, drop: "item lendário", video: "boss14.mp4" },
+    "15": { nome: "🦂 Imperador do Deserto", recompensa: 7500, drop: "item lendário", video: "boss15.mp4" },
+    "16": { nome: "🪄 Tirano Arcano", recompensa: 9000, drop: "item lendário", video: "boss16.mp4" },
+    "17": { nome: "🌋 Titã Vulcânico", recompensa: 12000, drop: "item lendário", video: "boss17.mp4" },
+    "18": { nome: "👁️ O Observador", recompensa: 16000, drop: "item mítico", video: "boss18.mp4" },
+    "19": { nome: "🌌 Rei do Vazio", recompensa: 25000, drop: "item mítico", video: "boss19.mp4" },
+    "20": { nome: "👑 Deus Astral", recompensa: 50000, drop: "item supremo", video: "boss20.mp4" }
+};

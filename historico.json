@@ -1,0 +1,610 @@
+[
+  {
+    "idUsuario": "554896669255",
+    "txId": "6SPGBL8",
+    "tipo": "pix_enviado",
+    "para": "کگستی رشن",
+    "valor": 1000,
+    "data": "2026-05-05T23:31:25.078Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "6SPGBL8",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 1000,
+    "data": "2026-05-05T23:31:25.079Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "K506WE4",
+    "tipo": "pix_enviado",
+    "para": "کگستی رشن",
+    "valor": 1000,
+    "data": "2026-05-06T00:30:56.101Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "K506WE4",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 1000,
+    "data": "2026-05-06T00:30:56.107Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "P7219NY",
+    "tipo": "pix_enviado",
+    "para": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 9682,
+    "data": "2026-05-06T00:31:15.146Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "P7219NY",
+    "tipo": "pix_recebido",
+    "de": "کگستی رشن",
+    "valor": 9682,
+    "data": "2026-05-06T00:31:15.147Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "0ANUZKU",
+    "tipo": "pix_enviado",
+    "para": "کگستی رشن",
+    "valor": 500,
+    "data": "2026-05-08T15:03:30.282Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "0ANUZKU",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 500,
+    "data": "2026-05-08T15:03:30.285Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "8N69PPD",
+    "tipo": "pix_enviado",
+    "para": "Victor Beluci",
+    "valor": 500,
+    "data": "2026-05-08T15:04:31.151Z"
+  },
+  {
+    "idUsuario": "180934859087884",
+    "txId": "8N69PPD",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 500,
+    "data": "2026-05-08T15:04:31.153Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "R9WAZZF",
+    "tipo": "pix_credito",
+    "para": "کگستی رشن",
+    "valor": 525,
+    "data": "2026-05-08T15:05:11.957Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "R9WAZZF",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 500,
+    "data": "2026-05-08T15:05:11.957Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "A9RO8R8",
+    "tipo": "pix_credito",
+    "para": "Victor Beluci",
+    "valor": 63000,
+    "data": "2026-05-08T15:05:52.372Z"
+  },
+  {
+    "idUsuario": "180934859087884",
+    "txId": "A9RO8R8",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 60000,
+    "data": "2026-05-08T15:05:52.372Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "9YPM75Z",
+    "tipo": "pix_enviado",
+    "para": "کگستی رشن",
+    "valor": 500000,
+    "data": "2026-05-09T01:00:27.123Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "9YPM75Z",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 500000,
+    "data": "2026-05-09T01:00:27.125Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "A3NH043",
+    "tipo": "pix_enviado",
+    "para": "Arthur",
+    "valor": 1,
+    "data": "2026-05-11T16:08:30.643Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "A3NH043",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 1,
+    "data": "2026-05-11T16:08:30.646Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "LOK5WZK",
+    "tipo": "pix_enviado",
+    "para": "Arthur",
+    "valor": 10,
+    "data": "2026-05-11T16:09:32.719Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "LOK5WZK",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 10,
+    "data": "2026-05-11T16:09:32.723Z"
+  },
+  {
+    "idUsuario": "40162457305238",
+    "txId": "MDSS52S",
+    "tipo": "pix_enviado",
+    "para": "Arthur",
+    "valor": 1000,
+    "data": "2026-05-11T16:09:34.517Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "MDSS52S",
+    "tipo": "pix_recebido",
+    "de": "لوانا",
+    "valor": 1000,
+    "data": "2026-05-11T16:09:34.518Z"
+  },
+  {
+    "idUsuario": "40162457305238",
+    "txId": "RXP8ZQV",
+    "tipo": "pix_enviado",
+    "para": "Arthur",
+    "valor": 1,
+    "data": "2026-05-16T18:34:24.046Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "RXP8ZQV",
+    "tipo": "pix_recebido",
+    "de": "لوانا",
+    "valor": 1,
+    "data": "2026-05-16T18:34:24.052Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "EZHRT65",
+    "tipo": "pix_enviado",
+    "para": "Arthur",
+    "valor": 1000,
+    "data": "2026-05-16T18:34:38.038Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "EZHRT65",
+    "tipo": "pix_recebido",
+    "de": "Nayara 💭",
+    "valor": 1000,
+    "data": "2026-05-16T18:34:38.042Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "RTP99RJ",
+    "tipo": "pix_enviado",
+    "para": "Arthur",
+    "valor": 3000,
+    "data": "2026-05-16T18:35:04.770Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "RTP99RJ",
+    "tipo": "pix_recebido",
+    "de": "Nayara 💭",
+    "valor": 3000,
+    "data": "2026-05-16T18:35:04.777Z"
+  },
+  {
+    "idUsuario": "3620808478792",
+    "txId": "19QTLR3",
+    "tipo": "pix_enviado",
+    "para": "Nayara 💭",
+    "valor": 50000,
+    "data": "2026-05-17T20:48:57.922Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "19QTLR3",
+    "tipo": "pix_recebido",
+    "de": "Arthur",
+    "valor": 50000,
+    "data": "2026-05-17T20:48:57.927Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "ES8GSRF",
+    "tipo": "pix_enviado",
+    "para": "Davi",
+    "valor": 500,
+    "data": "2026-05-20T18:57:30.701Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "ES8GSRF",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 500,
+    "data": "2026-05-20T18:57:30.707Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "O3YPJHR",
+    "tipo": "pix_enviado",
+    "para": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 800,
+    "data": "2026-05-20T18:58:01.395Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "O3YPJHR",
+    "tipo": "pix_recebido",
+    "de": "Davi",
+    "valor": 800,
+    "data": "2026-05-20T18:58:01.398Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "N37FC3E",
+    "tipo": "pix_enviado",
+    "para": "Laura",
+    "valor": 67,
+    "data": "2026-05-21T17:37:57.218Z"
+  },
+  {
+    "idUsuario": "250890783060216",
+    "txId": "N37FC3E",
+    "tipo": "pix_recebido",
+    "de": "Davi",
+    "valor": 67,
+    "data": "2026-05-21T17:37:57.220Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "I5YXN99",
+    "tipo": "pix_enviado",
+    "para": "Laura",
+    "valor": 42,
+    "data": "2026-05-21T17:38:04.255Z"
+  },
+  {
+    "idUsuario": "250890783060216",
+    "txId": "I5YXN99",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 42,
+    "data": "2026-05-21T17:38:04.255Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "3SSX4UF",
+    "tipo": "pix_enviado",
+    "para": "Laura",
+    "valor": 1,
+    "data": "2026-05-21T17:39:03.530Z"
+  },
+  {
+    "idUsuario": "250890783060216",
+    "txId": "3SSX4UF",
+    "tipo": "pix_recebido",
+    "de": "Davi",
+    "valor": 1,
+    "data": "2026-05-21T17:39:03.537Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "IJQDS5P",
+    "tipo": "pix_enviado",
+    "para": "Arthur Fernandes",
+    "valor": 63139948,
+    "data": "2026-05-22T00:07:42.204Z"
+  },
+  {
+    "idUsuario": "249567933108272",
+    "txId": "IJQDS5P",
+    "tipo": "pix_recebido",
+    "de": "Davi",
+    "valor": 63139948,
+    "data": "2026-05-22T00:07:42.212Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "9GD2I61",
+    "tipo": "pix_enviado",
+    "para": "Arthur Fernandes",
+    "valor": 14000000,
+    "data": "2026-05-22T00:11:14.127Z"
+  },
+  {
+    "idUsuario": "249567933108272",
+    "txId": "9GD2I61",
+    "tipo": "pix_recebido",
+    "de": "Davi",
+    "valor": 14000000,
+    "data": "2026-05-22T00:11:14.129Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "XK6LZOR",
+    "tipo": "pix_enviado",
+    "para": "Davi",
+    "valor": 100000000,
+    "data": "2026-05-22T00:14:09.883Z"
+  },
+  {
+    "idUsuario": "194884325630181",
+    "txId": "XK6LZOR",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 100000000,
+    "data": "2026-05-22T00:14:09.884Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "D16V6PT",
+    "tipo": "pix_enviado",
+    "para": "• Gonçalves🩸",
+    "valor": 2000,
+    "data": "2026-05-23T00:34:46.498Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "D16V6PT",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 2000,
+    "data": "2026-05-23T00:34:46.501Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "8MKMM9K",
+    "tipo": "pix_enviado",
+    "para": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 3000000,
+    "data": "2026-05-23T00:35:11.107Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "8MKMM9K",
+    "tipo": "pix_recebido",
+    "de": "• Gonçalves🩸",
+    "valor": 3000000,
+    "data": "2026-05-23T00:35:11.108Z"
+  },
+  {
+    "idUsuario": "36675413647516",
+    "txId": "65DFLHC",
+    "tipo": "pix_enviado",
+    "para": "rafael",
+    "valor": 10000000,
+    "data": "2026-05-23T17:37:41.350Z"
+  },
+  {
+    "idUsuario": "216351058714821",
+    "txId": "65DFLHC",
+    "tipo": "pix_recebido",
+    "de": "• Gonçalves🩸",
+    "valor": 10000000,
+    "data": "2026-05-23T17:37:41.353Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "AGRRTW2",
+    "tipo": "pix_enviado",
+    "para": "Nayara 💭",
+    "valor": 1,
+    "data": "2026-05-24T04:05:32.868Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "AGRRTW2",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 1,
+    "data": "2026-05-24T04:05:32.875Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "94GQ203",
+    "tipo": "pix_enviado",
+    "para": "Nayara 💭",
+    "valor": 67,
+    "data": "2026-05-24T04:05:47.418Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "94GQ203",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 67,
+    "data": "2026-05-24T04:05:47.419Z"
+  },
+  {
+    "idUsuario": "554896669255",
+    "txId": "570QQJI",
+    "tipo": "pix_enviado",
+    "para": "bahiano",
+    "valor": 67,
+    "data": "2026-05-24T04:08:20.957Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "570QQJI",
+    "tipo": "pix_recebido",
+    "de": "𝑁𝑖𝑐𝑜𝑙𝑎𝑠",
+    "valor": 67,
+    "data": "2026-05-24T04:08:20.961Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "0XHQFY5",
+    "tipo": "pix_enviado",
+    "para": "bahiano",
+    "valor": 1,
+    "data": "2026-05-24T04:09:17.361Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "0XHQFY5",
+    "tipo": "pix_recebido",
+    "de": "CIRILA",
+    "valor": 1,
+    "data": "2026-05-24T04:09:17.362Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "SIY452S",
+    "tipo": "pix_enviado",
+    "para": "Nayara 💭",
+    "valor": 1,
+    "data": "2026-05-24T04:10:38.389Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "SIY452S",
+    "tipo": "pix_recebido",
+    "de": "CIRILA",
+    "valor": 1,
+    "data": "2026-05-24T04:10:38.391Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "LS40L9W",
+    "tipo": "pix_enviado",
+    "para": "CIRILA",
+    "valor": 28.907,
+    "data": "2026-05-24T04:15:48.792Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "LS40L9W",
+    "tipo": "pix_recebido",
+    "de": "bahiano",
+    "valor": 28.907,
+    "data": "2026-05-24T04:15:48.794Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "CA19Q8R",
+    "tipo": "pix_enviado",
+    "para": "bahiano",
+    "valor": 1,
+    "data": "2026-05-25T04:41:05.681Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "CA19Q8R",
+    "tipo": "pix_recebido",
+    "de": "CIRILA",
+    "valor": 1,
+    "data": "2026-05-25T04:41:05.690Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "Y4GQA18",
+    "tipo": "pix_enviado",
+    "para": "bahiano",
+    "valor": 100000,
+    "data": "2026-05-25T04:46:33.939Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "Y4GQA18",
+    "tipo": "pix_recebido",
+    "de": "CIRILA",
+    "valor": 100000,
+    "data": "2026-05-25T04:46:33.943Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "VIDWZ4C",
+    "tipo": "pix_enviado",
+    "para": "bahiano",
+    "valor": 4000070,
+    "data": "2026-05-25T04:49:48.847Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "VIDWZ4C",
+    "tipo": "pix_recebido",
+    "de": "CIRILA",
+    "valor": 4000070,
+    "data": "2026-05-25T04:49:48.850Z"
+  },
+  {
+    "idUsuario": "12090785939520",
+    "txId": "FNSWO4R",
+    "tipo": "pix_enviado",
+    "para": "Nayara 💭",
+    "valor": 4,
+    "data": "2026-05-25T08:42:44.182Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "FNSWO4R",
+    "tipo": "pix_recebido",
+    "de": "bahiano",
+    "valor": 4,
+    "data": "2026-05-25T08:42:44.194Z"
+  },
+  {
+    "idUsuario": "138014915342587",
+    "txId": "VCZ82CB",
+    "tipo": "pix_enviado",
+    "para": "Nayara 💭",
+    "valor": 10,
+    "data": "2026-05-25T16:12:04.199Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "VCZ82CB",
+    "tipo": "pix_recebido",
+    "de": "a n e",
+    "valor": 10,
+    "data": "2026-05-25T16:12:04.232Z"
+  },
+  {
+    "idUsuario": "6421445894289",
+    "txId": "N9NWZBN",
+    "tipo": "pix_enviado",
+    "para": "₢نايارا",
+    "valor": 1,
+    "data": "2026-05-26T15:11:10.648Z"
+  },
+  {
+    "idUsuario": "101649678876924",
+    "txId": "N9NWZBN",
+    "tipo": "pix_recebido",
+    "de": "CIRILA",
+    "valor": 1,
+    "data": "2026-05-26T15:11:10.660Z"
+  }
+]
