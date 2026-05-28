@@ -1,0 +1,29 @@
+module.exports = {
+    name: 'loja-biomas',
+    execute: async (sock, msg) => {
+        const texto = "╭━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╮\n" +
+                      "┃                 🌍 𝑫𝑨𝑬𝑴𝑶𝑵 - 𝑳𝑶𝑱𝑨 𝑫𝑬 𝑩𝑰𝑶𝑴𝑨𝑺                 ┃\n" +
+                      "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯\n\n" +
+                      "💰 BIOMAS DISPONÍVEIS PARA COMPRA\n" +
+                      "──────────────────────────────────────────────────────────────\n\n" +
+                      "📍 01. CAVERNA PROFUNDA\n💰 R$ 25m\n⛏️ +10% chance de metais valiosos\n\n" +
+                      "📍 02. MINA ABANDONADA\n💰 R$ 18m\n⛏️ +15% loot geral\n\n" +
+                      "📍 03. MONTANHA DE FERRO\n💰 R$ 12m\n⛏️ +20% minerais industriais\n\n" +
+                      "📍 04. DESERTO MINERAL\n💰 R$ 30m\n⛏️ +10% gemas raras\n\n" +
+                      "📍 05. FLORESTA SUBTERRÂNEA\n💰 R$ 40m\n⛏️ +12% loot balanceado\n\n" +
+                      "📍 06. CAVERNA DE CRISTAL\n💰 R$ 75m\n⛏️ +25% gemas e diamantes\n\n" +
+                      "📍 07. CRATERA DE METEORO\n💰 R$ 120m\n⛏️ +30% exóticos e meteoritos\n\n" +
+                      "📍 08. MINA CONGELADA\n💰 R$ 90m\n⛏️ +18% diamantes especiais\n\n" +
+                      "📍 09. REGIÃO VULCÂNICA\n💰 R$ 150m\n⛏️ +22% metais raros\n\n" +
+                      "📍 10. VÁCUO PROFUNDO (SECRETO)\n💰 R$ 500m\n⛏️ +50% míticos e ultra raros\n\n" +
+                      "──────────────────────────────────────────────────────────────\n" +
+                      "💡 COMO COMPRAR:\n💰 !comprar-bioma [ID]\n\n" +
+                      "📌 EXEMPLO:\n!comprar-bioma 07\n\n" +
+                      "──────────────────────────────────────────────────────────────\n" +
+                      "⚠️ INFORMAÇÕES:\n" +
+                      "• Biomas melhoram o resultado do !minerar\n" +
+                      "• O Bioma não vai pra mochila, ele é equipado na hora!\n" +
+                      "╰━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╯";
+        await sock.sendMessage(msg.key.remoteJid, { text: texto }, { quoted: msg });
+    }
+};
